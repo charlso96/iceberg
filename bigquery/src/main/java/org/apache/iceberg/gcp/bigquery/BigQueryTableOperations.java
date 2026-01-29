@@ -21,10 +21,12 @@ package org.apache.iceberg.gcp.bigquery;
 import com.google.api.services.bigquery.model.ExternalCatalogTableOptions;
 import com.google.api.services.bigquery.model.Table;
 import com.google.api.services.bigquery.model.TableReference;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import org.apache.iceberg.BaseMetastoreOperations;
 import org.apache.iceberg.BaseMetastoreTableOperations;
+import org.apache.iceberg.File2;
 import org.apache.iceberg.SnapshotSummary;
 import org.apache.iceberg.TableMetadata;
 import org.apache.iceberg.TableProperties;
@@ -118,6 +120,56 @@ final class BigQueryTableOperations extends BaseMetastoreTableOperations {
             newMetadataLocation,
             tableName(),
             e);
+      }
+    }
+  }
+
+  // The doCommit method should provide implementation on how to update with metadata location
+  // atomically
+  @Override
+  public void doCommit2(TableMetadata base, TableMetadata metadata, List<File2> fileLogs) {
+    String newMetadataLocation =
+            base == null && metadata.metadataFileLocation() != null
+                    ? metadata.metadataFileLocation()
+                    : writeNewMetadata(metadata, currentVersion() + 1);
+    BaseMetastoreOperations.CommitStatus commitStatus =
+            BaseMetastoreOperations.CommitStatus.FAILURE;
+    try {
+      if (base == null) {
+        createTable(newMetadataLocation, metadata);
+      } else {
+        updateTable(base.metadataFileLocation(), newMetadataLocation, metadata);
+      }
+      fileLogs.add(new File2(newMetadataLocation, File2.File2Type.ADD, "metadata"));
+      commitStatus = BaseMetastoreOperations.CommitStatus.SUCCESS;
+    } catch (CommitFailedException | CommitStateUnknownException e) {
+      throw e;
+    } catch (Throwable e) {
+      LOG.error("Exception thrown on commit: ", e);
+      if (e instanceof AlreadyExistsException) {
+        throw e;
+      }
+      commitStatus =
+              BaseMetastoreOperations.CommitStatus.valueOf(
+                      checkCommitStatus(newMetadataLocation, metadata).name());
+      if (commitStatus == BaseMetastoreOperations.CommitStatus.FAILURE) {
+        throw new CommitFailedException(e, "Failed to commit");
+      }
+      if (commitStatus == BaseMetastoreOperations.CommitStatus.UNKNOWN) {
+        throw new CommitStateUnknownException(e);
+      }
+    } finally {
+      try {
+        if (commitStatus == BaseMetastoreOperations.CommitStatus.FAILURE) {
+          LOG.warn("Failed to commit updates to table {}", tableName());
+          io().deleteFile(newMetadataLocation);
+        }
+      } catch (RuntimeException e) {
+        LOG.error(
+                "Failed to cleanup metadata file at {} for table {}",
+                newMetadataLocation,
+                tableName(),
+                e);
       }
     }
   }

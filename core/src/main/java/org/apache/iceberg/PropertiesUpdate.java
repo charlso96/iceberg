@@ -27,6 +27,7 @@ import static org.apache.iceberg.TableProperties.COMMIT_NUM_RETRIES_DEFAULT;
 import static org.apache.iceberg.TableProperties.COMMIT_TOTAL_RETRY_TIME_MS;
 import static org.apache.iceberg.TableProperties.COMMIT_TOTAL_RETRY_TIME_MS_DEFAULT;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.apache.iceberg.exceptions.CommitFailedException;
@@ -113,5 +114,24 @@ class PropertiesUpdate implements UpdateProperties {
               TableMetadata updated = base.replaceProperties(newProperties);
               taskOps.commit(base, updated);
             });
+  }
+
+  @Override
+  public void commit2(List<File2> fileLogs) {
+    // If existing table commit properties in base are corrupted, allow rectification
+    Tasks.foreach(ops)
+            .retry(base.propertyTryAsInt(COMMIT_NUM_RETRIES, COMMIT_NUM_RETRIES_DEFAULT))
+            .exponentialBackoff(
+                    base.propertyTryAsInt(COMMIT_MIN_RETRY_WAIT_MS, COMMIT_MIN_RETRY_WAIT_MS_DEFAULT),
+                    base.propertyTryAsInt(COMMIT_MAX_RETRY_WAIT_MS, COMMIT_MAX_RETRY_WAIT_MS_DEFAULT),
+                    base.propertyTryAsInt(COMMIT_TOTAL_RETRY_TIME_MS, COMMIT_TOTAL_RETRY_TIME_MS_DEFAULT),
+                    2.0 /* exponential */)
+            .onlyRetryOn(CommitFailedException.class)
+            .run(
+                    taskOps -> {
+                      Map<String, String> newProperties = apply();
+                      TableMetadata updated = base.replaceProperties(newProperties);
+                      taskOps.commit2(base, updated, fileLogs);
+                    });
   }
 }

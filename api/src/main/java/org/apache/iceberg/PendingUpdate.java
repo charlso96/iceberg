@@ -18,6 +18,7 @@
  */
 package org.apache.iceberg;
 
+import java.util.List;
 import org.apache.iceberg.exceptions.CommitFailedException;
 import org.apache.iceberg.exceptions.CommitStateUnknownException;
 import org.apache.iceberg.exceptions.ValidationException;
@@ -53,6 +54,7 @@ public interface PendingUpdate<T> {
    *     should be done in this case.
    */
   void commit();
+  void commit2(List<File2> fileLogs);
 
   /**
    * Generates update event to notify about metadata changes

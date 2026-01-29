@@ -18,6 +18,7 @@
  */
 package org.apache.iceberg;
 
+import java.util.List;
 import org.apache.iceberg.metrics.MetricsReporter;
 import org.apache.iceberg.relocated.com.google.common.base.Preconditions;
 
@@ -181,6 +182,14 @@ public class SnapshotManager implements ManageSnapshots {
     commitIfRefUpdatesExist();
     if (!isExternalTransaction) {
       transaction.commitTransaction();
+    }
+  }
+
+  @Override
+  public void commit2(List<File2> fileLogs) {
+    commitIfRefUpdatesExist();
+    if (!isExternalTransaction) {
+      transaction.commitTransaction2();
     }
   }
 }

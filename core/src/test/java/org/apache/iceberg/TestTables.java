@@ -21,6 +21,7 @@ package org.apache.iceberg;
 import static org.apache.iceberg.TableMetadata.newTableMetadata;
 
 import java.io.File;
+import java.util.List;
 import java.util.Map;
 import org.apache.iceberg.exceptions.AlreadyExistsException;
 import org.apache.iceberg.exceptions.CommitFailedException;
@@ -228,6 +229,12 @@ public class TestTables {
         super.commit(base, updatedMetadata);
         throw new CommitStateUnknownException(new RuntimeException("datacenter on fire"));
       }
+
+      @Override
+      public void commit2(TableMetadata base, TableMetadata updatedMetadata, List<File2> fileLogs) {
+        super.commit2(base, updatedMetadata, fileLogs);
+        throw new CommitStateUnknownException(new RuntimeException("datacenter on fire"));
+      }
     };
   }
 
@@ -340,6 +347,35 @@ public class TestTables {
         } else {
           throw new CommitFailedException(
               "Commit failed: table was updated at %d", current.lastUpdatedMillis());
+        }
+      }
+    }
+
+    @Override
+    public void commit2(TableMetadata base, TableMetadata updatedMetadata, List<File2> fileLogs) {
+      if (base != current) {
+        throw new CommitFailedException("Cannot commit changes based on stale metadata");
+      }
+      synchronized (METADATA) {
+        refresh();
+        if (base == current) {
+          if (failCommits > 0) {
+            this.failCommits -= 1;
+            throw new CommitFailedException("Injected failure");
+          }
+          Integer version = VERSIONS.get(tableName);
+          // remove changes from the committed metadata
+          this.current =
+                  TableMetadata.buildFrom(updatedMetadata)
+                          .discardChanges()
+                          .withMetadataLocation((current != null) ? current.metadataFileLocation() : null)
+                          .build();
+          VERSIONS.put(tableName, version == null ? 0 : version + 1);
+          METADATA.put(tableName, current);
+          fileLogs.add(new File2(current.metadataFileLocation(), File2.File2Type.ADD, "metadata"));
+        } else {
+          throw new CommitFailedException(
+                  "Commit failed: table was updated at %d", current.lastUpdatedMillis());
         }
       }
     }

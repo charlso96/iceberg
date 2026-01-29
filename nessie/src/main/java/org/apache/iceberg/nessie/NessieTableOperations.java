@@ -18,7 +18,9 @@
  */
 package org.apache.iceberg.nessie;
 
+import java.util.List;
 import org.apache.iceberg.BaseMetastoreTableOperations;
+import org.apache.iceberg.File2;
 import org.apache.iceberg.TableMetadata;
 import org.apache.iceberg.TableMetadataParser;
 import org.apache.iceberg.exceptions.NoSuchTableException;
@@ -131,6 +133,36 @@ public class NessieTableOperations extends BaseMetastoreTableOperations {
       failure = true;
       throw NessieUtil.handleBadRequestForCommit(client, key, Content.Type.ICEBERG_TABLE)
           .orElse(ex);
+    } finally {
+      if (failure) {
+        io().deleteFile(newMetadataLocation);
+      }
+    }
+  }
+
+  @Override
+  protected void doCommit2(TableMetadata base, TableMetadata metadata, List<File2> fileLogs) {
+    boolean newTable = base == null;
+    String newMetadataLocation = writeNewMetadataIfRequired(newTable, metadata);
+
+    boolean failure = false;
+    try {
+      String contentId = table == null ? null : table.getId();
+      client.commitTable(base, metadata, newMetadataLocation, contentId, key);
+      fileLogs.add(new File2(newMetadataLocation, File2.File2Type.ADD, "metadata"));
+    } catch (NessieConflictException | NessieNotFoundException | HttpClientException ex) {
+      if (ex instanceof NessieConflictException || ex instanceof NessieNotFoundException) {
+        failure = true;
+      }
+      NessieUtil.handleExceptionsForCommits(ex, client.refName(), Content.Type.ICEBERG_TABLE)
+              .ifPresent(
+                      exception -> {
+                        throw exception;
+                      });
+    } catch (NessieBadRequestException ex) {
+      failure = true;
+      throw NessieUtil.handleBadRequestForCommit(client, key, Content.Type.ICEBERG_TABLE)
+              .orElse(ex);
     } finally {
       if (failure) {
         io().deleteFile(newMetadataLocation);

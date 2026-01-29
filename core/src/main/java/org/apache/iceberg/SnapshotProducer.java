@@ -249,6 +249,8 @@ abstract class SnapshotProducer<ThisT> implements SnapshotUpdate<ThisT> {
    */
   protected abstract List<ManifestFile> apply(TableMetadata metadataToUpdate, Snapshot snapshot);
 
+  protected abstract List<ManifestFile> apply2(TableMetadata metadataToUpdate, Snapshot snapshot, List<File2> fileLogs);
+
   @Override
   public Snapshot apply() {
     refresh();
@@ -324,6 +326,82 @@ abstract class SnapshotProducer<ThisT> implements SnapshotUpdate<ThisT> {
         nextRowId,
         assignedRows,
         null);
+  }
+
+  public Snapshot apply2(List<File2> fileLogs) {
+    refresh();
+    Snapshot parentSnapshot = SnapshotUtil.latestSnapshot(base, targetBranch);
+
+    long sequenceNumber = base.nextSequenceNumber();
+    Long parentSnapshotId = parentSnapshot == null ? null : parentSnapshot.snapshotId();
+
+    validate(base, parentSnapshot);
+    List<ManifestFile> manifests = apply2(base, parentSnapshot, fileLogs);
+    OutputFile manifestList = manifestListPath();
+
+    ManifestListWriter writer =
+            ManifestLists.write(
+                    ops.current().formatVersion(),
+                    manifestList,
+                    snapshotId(),
+                    parentSnapshotId,
+                    sequenceNumber,
+                    base.nextRowId());
+
+    try (writer) {
+      // keep track of the manifest lists created
+      manifestLists.add(manifestList.location());
+      fileLogs.add(new File2(manifestList.location(), File2.File2Type.ADD, "manifest_list"));
+
+      ManifestFile[] manifestFiles = new ManifestFile[manifests.size()];
+
+      Tasks.range(manifestFiles.length)
+              .stopOnFailure()
+              .throwFailureWhenFinished()
+              .executeWith(workerPool())
+              .run(index -> manifestFiles[index] = manifestsWithMetadata.get(manifests.get(index)));
+
+      writer.addAll(Arrays.asList(manifestFiles));
+    } catch (IOException e) {
+      throw new RuntimeIOException(e, "Failed to write manifest list file");
+    }
+
+    Long nextRowId = null;
+    Long assignedRows = null;
+    if (base.formatVersion() >= 3) {
+      nextRowId = base.nextRowId();
+      assignedRows = writer.nextRowId() - base.nextRowId();
+    }
+
+    Map<String, String> summary = summary();
+    String operation = operation();
+
+    if (summary != null && DataOperations.REPLACE.equals(operation)) {
+      long addedRecords =
+              PropertyUtil.propertyAsLong(summary, SnapshotSummary.ADDED_RECORDS_PROP, 0L);
+      long replacedRecords =
+              PropertyUtil.propertyAsLong(summary, SnapshotSummary.DELETED_RECORDS_PROP, 0L);
+
+      // added may be less than replaced when records are already deleted by delete files
+      Preconditions.checkArgument(
+              addedRecords <= replacedRecords,
+              "Invalid REPLACE operation: %s added records > %s replaced records",
+              addedRecords,
+              replacedRecords);
+    }
+
+    return new BaseSnapshot(
+            sequenceNumber,
+            snapshotId(),
+            parentSnapshotId,
+            System.currentTimeMillis(),
+            operation(),
+            summary(base),
+            base.currentSchemaId(),
+            manifestList.location(),
+            nextRowId,
+            assignedRows,
+            null);
   }
 
   protected abstract Map<String, String> summary();
@@ -497,6 +575,94 @@ abstract class SnapshotProducer<ThisT> implements SnapshotUpdate<ThisT> {
         LOG.warn(
             "Failed to load committed table metadata or during cleanup, skipping further cleanup",
             e);
+      }
+    }
+
+    try {
+      notifyListeners();
+    } catch (Throwable e) {
+      LOG.warn("Failed to notify event listeners", e);
+    }
+  }
+
+  @Override
+  @SuppressWarnings("checkstyle:CyclomaticComplexity")
+  public void commit2(List<File2> fileLogs) {
+    // this is always set to the latest commit attempt's snapshot
+    AtomicReference<Snapshot> stagedSnapshot = new AtomicReference<>();
+    try (Timed ignore = commitMetrics().totalDuration().start()) {
+      try {
+        Tasks.foreach(ops)
+                .retry(base.propertyAsInt(COMMIT_NUM_RETRIES, COMMIT_NUM_RETRIES_DEFAULT))
+                .exponentialBackoff(
+                        base.propertyAsInt(COMMIT_MIN_RETRY_WAIT_MS, COMMIT_MIN_RETRY_WAIT_MS_DEFAULT),
+                        base.propertyAsInt(COMMIT_MAX_RETRY_WAIT_MS, COMMIT_MAX_RETRY_WAIT_MS_DEFAULT),
+                        base.propertyAsInt(COMMIT_TOTAL_RETRY_TIME_MS, COMMIT_TOTAL_RETRY_TIME_MS_DEFAULT),
+                        2.0 /* exponential */)
+                .onlyRetryOn(CommitFailedException.class)
+                .countAttempts(commitMetrics().attempts())
+                .run(
+                        taskOps -> {
+                          Snapshot newSnapshot = apply2(fileLogs);
+                          stagedSnapshot.set(newSnapshot);
+                          TableMetadata.Builder update = TableMetadata.buildFrom(base);
+                          if (base.snapshot(newSnapshot.snapshotId()) != null) {
+                            // this is a rollback operation
+                            update.setBranchSnapshot(newSnapshot.snapshotId(), targetBranch);
+                          } else if (stageOnly) {
+                            update.addSnapshot(newSnapshot);
+                          } else {
+                            update.setBranchSnapshot(newSnapshot, targetBranch);
+                          }
+
+                          TableMetadata updated = update.build();
+                          if (updated.changes().isEmpty()) {
+                            // do not commit if the metadata has not changed. for example, this may happen
+                            // when setting the current
+                            // snapshot to an ID that is already current. note that this check uses
+                            // identity.
+                            return;
+                          }
+
+                          // if the table UUID is missing, add it here. the UUID will be re-created each
+                          // time
+                          // this operation retries
+                          // to ensure that if a concurrent operation assigns the UUID, this operation will
+                          // not fail.
+                          taskOps.commit(base, updated.withUUID());
+                        });
+
+      } catch (CommitStateUnknownException commitStateUnknownException) {
+        throw commitStateUnknownException;
+      } catch (RuntimeException e) {
+        if (!strictCleanup || e instanceof CleanableFailure) {
+          Exceptions.suppressAndThrow(e, this::cleanAll);
+        }
+
+        throw e;
+      }
+
+      // at this point, the commit must have succeeded so the stagedSnapshot is committed
+      Snapshot committedSnapshot = stagedSnapshot.get();
+      try {
+        LOG.info(
+                "Committed snapshot {} ({})",
+                committedSnapshot.snapshotId(),
+                getClass().getSimpleName());
+
+        if (cleanupAfterCommit()) {
+          cleanUncommitted(Sets.newHashSet(committedSnapshot.allManifests(ops.io())));
+        }
+        // also clean up unused manifest lists created by multiple attempts
+        for (String manifestList : manifestLists) {
+          if (!committedSnapshot.manifestListLocation().equals(manifestList)) {
+            deleteFile(manifestList);
+          }
+        }
+      } catch (Throwable e) {
+        LOG.warn(
+                "Failed to load committed table metadata or during cleanup, skipping further cleanup",
+                e);
       }
     }
 

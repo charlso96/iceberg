@@ -345,6 +345,17 @@ class BaseUpdatePartitionSpec implements UpdatePartitionSpec {
     ops.commit(base, update);
   }
 
+  @Override
+  public void commit2(List<File2> fileLogs) {
+    TableMetadata update;
+    if (setAsDefault) {
+      update = base.updatePartitionSpec(apply());
+    } else {
+      update = base.addPartitionSpec(apply());
+    }
+    ops.commit2(base, update, fileLogs);
+  }
+
   private Pair<Integer, Transform<?, ?>> resolve(Term term) {
     Preconditions.checkArgument(term instanceof UnboundTerm, "Term must be unbound");
 

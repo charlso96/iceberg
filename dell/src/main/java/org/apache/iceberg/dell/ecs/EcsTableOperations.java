@@ -18,8 +18,10 @@
  */
 package org.apache.iceberg.dell.ecs;
 
+import java.util.List;
 import java.util.Map;
 import org.apache.iceberg.BaseMetastoreTableOperations;
+import org.apache.iceberg.File2;
 import org.apache.iceberg.TableMetadata;
 import org.apache.iceberg.exceptions.CommitFailedException;
 import org.apache.iceberg.exceptions.NoSuchTableException;
@@ -106,6 +108,31 @@ public class EcsTableOperations extends BaseMetastoreTableOperations {
             "Replace failed, E-Tag %s mismatch for table %s", cachedETag, tableName());
       }
     }
+  }
+
+  @Override
+  protected void doCommit2(TableMetadata base, TableMetadata metadata, List<File2> fileLogs) {
+    boolean newTable = base == null;
+    String newMetadataLocation = writeNewMetadataIfRequired(newTable, metadata);
+    if (base == null) {
+      // create a new table, the metadataKey should be absent
+      if (!catalog.putNewProperties(tableObject, buildProperties(newMetadataLocation))) {
+        throw new CommitFailedException("Table is existing when create table %s", tableName());
+      }
+    } else {
+      String cachedETag = eTag;
+      Preconditions.checkNotNull(cachedETag, "E-Tag must be not null when update table");
+      // replace to a new version, the E-Tag should be present and matched
+      boolean result =
+              catalog.updatePropertiesObject(
+                      tableObject, cachedETag, buildProperties(newMetadataLocation));
+      if (!result) {
+        throw new CommitFailedException(
+                "Replace failed, E-Tag %s mismatch for table %s", cachedETag, tableName());
+      }
+    }
+
+    fileLogs.add(new File2(newMetadataLocation, File2.File2Type.ADD, "metadata"));
   }
 
   /** Build properties for table */

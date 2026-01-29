@@ -25,9 +25,11 @@ import java.sql.SQLNonTransientConnectionException;
 import java.sql.SQLTimeoutException;
 import java.sql.SQLTransientConnectionException;
 import java.sql.SQLWarning;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import org.apache.iceberg.BaseMetastoreTableOperations;
+import org.apache.iceberg.File2;
 import org.apache.iceberg.TableMetadata;
 import org.apache.iceberg.catalog.Namespace;
 import org.apache.iceberg.catalog.TableIdentifier;
@@ -120,6 +122,55 @@ class JdbcTableOperations extends BaseMetastoreTableOperations {
         createTable(newMetadataLocation);
       }
 
+    } catch (SQLIntegrityConstraintViolationException e) {
+
+      if (currentMetadataLocation() == null) {
+        throw new AlreadyExistsException(e, "Table already exists: %s", tableIdentifier);
+      } else {
+        throw new UncheckedSQLException(e, "Table already exists: %s", tableIdentifier);
+      }
+
+    } catch (SQLTimeoutException e) {
+      throw new UncheckedSQLException(e, "Database Connection timeout");
+    } catch (SQLTransientConnectionException | SQLNonTransientConnectionException e) {
+      throw new UncheckedSQLException(e, "Database Connection failed");
+    } catch (DataTruncation e) {
+      throw new UncheckedSQLException(e, "Database data truncation error");
+    } catch (SQLWarning e) {
+      throw new UncheckedSQLException(e, "Database warning");
+    } catch (SQLException e) {
+      // SQLite doesn't set SQLState or throw SQLIntegrityConstraintViolationException
+      if (e.getMessage() != null && e.getMessage().contains("constraint failed")) {
+        throw new AlreadyExistsException("Table already exists: %s", tableIdentifier);
+      }
+
+      throw new UncheckedSQLException(e, "Unknown failure");
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      throw new UncheckedInterruptedException(e, "Interrupted during commit");
+    }
+  }
+
+  @Override
+  public void doCommit2(TableMetadata base, TableMetadata metadata, List<File2> fileLogs) {
+    boolean newTable = base == null;
+    String newMetadataLocation = writeNewMetadataIfRequired(newTable, metadata);
+    try {
+      Map<String, String> table =
+              JdbcUtil.loadTable(schemaVersion, connections, catalogName, tableIdentifier);
+
+      if (base != null) {
+        validateMetadataLocation(table, base);
+        String oldMetadataLocation = base.metadataFileLocation();
+        // Start atomic update
+        LOG.debug("Committing existing table: {}", tableName());
+        updateTable(newMetadataLocation, oldMetadataLocation);
+      } else {
+        // table not exists create it
+        LOG.debug("Committing new table: {}", tableName());
+        createTable(newMetadataLocation);
+      }
+      fileLogs.add(new File2(newMetadataLocation, File2.File2Type.ADD, "metadata"));
     } catch (SQLIntegrityConstraintViolationException e) {
 
       if (currentMetadataLocation() == null) {

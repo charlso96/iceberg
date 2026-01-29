@@ -24,6 +24,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
+import org.apache.iceberg.File2;
 import org.apache.iceberg.LocationProviders;
 import org.apache.iceberg.MetadataUpdate;
 import org.apache.iceberg.TableMetadata;
@@ -165,6 +166,65 @@ class RESTTableOperations implements TableOperations {
   }
 
   @Override
+  public void commit2(TableMetadata base, TableMetadata metadata, List<File2> fileLogs) {
+    Endpoint.check(endpoints, Endpoint.V1_UPDATE_TABLE);
+    Consumer<ErrorResponse> errorHandler;
+    List<UpdateRequirement> requirements;
+    List<MetadataUpdate> updates;
+    switch (updateType) {
+      case CREATE:
+        Preconditions.checkState(
+                base == null, "Invalid base metadata for create transaction, expected null: %s", base);
+        updates =
+                ImmutableList.<MetadataUpdate>builder()
+                        .addAll(createChanges)
+                        .addAll(metadata.changes())
+                        .build();
+        requirements = UpdateRequirements.forCreateTable(updates);
+        errorHandler = ErrorHandlers.tableErrorHandler(); // throws NoSuchTableException
+        break;
+
+      case REPLACE:
+        Preconditions.checkState(base != null, "Invalid base metadata: null");
+        updates =
+                ImmutableList.<MetadataUpdate>builder()
+                        .addAll(createChanges)
+                        .addAll(metadata.changes())
+                        .build();
+        // use the original replace base metadata because the transaction will refresh
+        requirements = UpdateRequirements.forReplaceTable(replaceBase, updates);
+        errorHandler = ErrorHandlers.tableCommitHandler();
+        break;
+
+      case SIMPLE:
+        Preconditions.checkState(base != null, "Invalid base metadata: null");
+        updates = metadata.changes();
+        requirements = UpdateRequirements.forUpdateTable(base, updates);
+        errorHandler = ErrorHandlers.tableCommitHandler();
+        break;
+
+      default:
+        throw new UnsupportedOperationException(
+                String.format("Update type %s is not supported", updateType));
+    }
+
+    UpdateTableRequest request = new UpdateTableRequest(requirements, updates);
+
+    // the error handler will throw necessary exceptions like CommitFailedException and
+    // UnknownCommitStateException
+    // TODO: ensure that the HTTP client lib passes HTTP client errors to the error handler
+    LoadTableResponse response =
+            client.post(path, request, LoadTableResponse.class, headers, errorHandler);
+
+    // all future commits should be simple commits
+    this.updateType = UpdateType.SIMPLE;
+
+    updateCurrentMetadata(response);
+
+    fileLogs.add(new File2(current().metadataFileLocation(), File2.File2Type.ADD, "metadata");
+  }
+
+  @Override
   public FileIO io() {
     return io;
   }
@@ -217,6 +277,11 @@ class RESTTableOperations implements TableOperations {
 
       @Override
       public void commit(TableMetadata base, TableMetadata metadata) {
+        throw new UnsupportedOperationException("Cannot call commit on temporary table operations");
+      }
+
+      @Override
+      public void commit2(TableMetadata base, TableMetadata metadata, List<File2> fileLogs) {
         throw new UnsupportedOperationException("Cannot call commit on temporary table operations");
       }
 

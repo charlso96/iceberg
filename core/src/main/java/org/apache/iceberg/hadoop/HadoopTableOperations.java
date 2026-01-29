@@ -22,6 +22,7 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -31,6 +32,7 @@ import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.iceberg.CatalogUtil;
+import org.apache.iceberg.File2;
 import org.apache.iceberg.LocationProviders;
 import org.apache.iceberg.LockManager;
 import org.apache.iceberg.TableMetadata;
@@ -172,6 +174,50 @@ public class HadoopTableOperations implements TableOperations {
   }
 
   @Override
+  public void commit2(TableMetadata base, TableMetadata metadata, List<File2> fileLogs) {
+    Pair<Integer, TableMetadata> current = versionAndMetadata();
+    if (base != current.second()) {
+      throw new CommitFailedException("Cannot commit changes based on stale table metadata");
+    }
+
+    if (base == metadata) {
+      LOG.info("Nothing to commit.");
+      return;
+    }
+
+    Preconditions.checkArgument(
+            base == null || base.location().equals(metadata.location()),
+            "Hadoop path-based tables cannot be relocated");
+    Preconditions.checkArgument(
+            !metadata.properties().containsKey(TableProperties.WRITE_METADATA_LOCATION),
+            "Hadoop path-based tables cannot relocate metadata");
+
+    String codecName =
+            metadata.property(
+                    TableProperties.METADATA_COMPRESSION, TableProperties.METADATA_COMPRESSION_DEFAULT);
+    TableMetadataParser.Codec codec = TableMetadataParser.Codec.fromName(codecName);
+    String fileExtension = TableMetadataParser.getFileExtension(codec);
+    Path tempMetadataFile = metadataPath(UUID.randomUUID() + fileExtension);
+    TableMetadataParser.write(metadata, io().newOutputFile(tempMetadataFile.toString()));
+
+    int nextVersion = (current.first() != null ? current.first() : 0) + 1;
+    Path finalMetadataFile = metadataFilePath(nextVersion, codec);
+    FileSystem fs = getFileSystem(tempMetadataFile, conf);
+
+    // this rename operation is the atomic commit operation
+    renameToFinal(fs, tempMetadataFile, finalMetadataFile, nextVersion);
+
+    LOG.info("Committed a new metadata file {}", finalMetadataFile);
+
+    // update the best-effort version pointer
+    writeVersionHint(nextVersion);
+
+    CatalogUtil.deleteRemovedMetadataFiles(io(), base, metadata);
+    fileLogs.add(new File2(finalMetadataFile.toString(), File2.File2Type.ADD, "metadata"));
+    this.shouldRefresh = true;
+  }
+
+  @Override
   public FileIO io() {
     return fileIO;
   }
@@ -202,6 +248,11 @@ public class HadoopTableOperations implements TableOperations {
 
       @Override
       public void commit(TableMetadata base, TableMetadata metadata) {
+        throw new UnsupportedOperationException("Cannot call commit on temporary table operations");
+      }
+
+      @Override
+      public void commit2(TableMetadata base, TableMetadata metadata, List<File2> fileLogs) {
         throw new UnsupportedOperationException("Cannot call commit on temporary table operations");
       }
 

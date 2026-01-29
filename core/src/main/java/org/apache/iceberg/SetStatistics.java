@@ -55,6 +55,13 @@ public class SetStatistics implements UpdateStatistics {
     ops.commit(base, newMetadata);
   }
 
+  @Override
+  public void commit2(List<File2> fileLogs) {
+    TableMetadata base = ops.current();
+    TableMetadata newMetadata = internalApply(base);
+    ops.commit2(base, newMetadata, fileLogs);
+  }
+
   private TableMetadata internalApply(TableMetadata base) {
     TableMetadata.Builder builder = TableMetadata.buildFrom(base);
     statisticsToSet.forEach(

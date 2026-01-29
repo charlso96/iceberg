@@ -24,6 +24,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Collectors;
 import org.apache.iceberg.BaseMetastoreTableOperations;
+import org.apache.iceberg.File2;
 import org.apache.iceberg.TableMetadata;
 import org.apache.iceberg.aws.AwsProperties;
 import org.apache.iceberg.aws.util.RetryDetector;
@@ -147,6 +148,68 @@ class DynamoDbTableOperations extends BaseMetastoreTableOperations {
         case FAILURE:
           throw new CommitFailedException(
               persistFailure, "Cannot commit %s due to unexpected exception", tableName());
+        case UNKNOWN:
+          throw new CommitStateUnknownException(persistFailure);
+      }
+    } finally {
+      try {
+        if (commitStatus == CommitStatus.FAILURE) {
+          // if anything went wrong, clean up the uncommitted metadata file
+          io().deleteFile(newMetadataLocation);
+        }
+      } catch (RuntimeException e) {
+        LOG.error("Failed to cleanup metadata file at {}", newMetadataLocation, e);
+      }
+    }
+  }
+
+  @Override
+  protected void doCommit2(TableMetadata base, TableMetadata metadata, List<File2> fileLogs) {
+    boolean newTable = base == null;
+    String newMetadataLocation = writeNewMetadataIfRequired(newTable, metadata);
+    CommitStatus commitStatus = CommitStatus.FAILURE;
+    RetryDetector retryDetector = new RetryDetector();
+    Map<String, AttributeValue> tableKey = DynamoDbCatalog.tablePrimaryKey(tableIdentifier);
+    try {
+      GetItemResponse table =
+              dynamo.getItem(
+                      GetItemRequest.builder()
+                              .tableName(awsProperties.dynamoDbTableName())
+                              .consistentRead(true)
+                              .key(tableKey)
+                              .build());
+      checkMetadataLocation(table, base);
+      Map<String, String> properties = prepareProperties(table, newMetadataLocation);
+      persistTable(tableKey, table, properties, retryDetector);
+      commitStatus = CommitStatus.SUCCESS;
+    } catch (CommitFailedException e) {
+      // any explicit commit failures are passed up and out to the retry handler
+      throw e;
+    } catch (RuntimeException persistFailure) {
+      boolean conditionCheckFailed = persistFailure instanceof ConditionalCheckFailedException;
+
+      // If we got an exception we weren't expecting, or we got a ConditionalCheckFailedException
+      // but retries were performed, attempt to reconcile the actual commit status.
+      if (!conditionCheckFailed || retryDetector.retried()) {
+        LOG.warn(
+                "Received unexpected failure when committing to {}, validating if commit ended up succeeding.",
+                fullTableName,
+                persistFailure);
+        commitStatus = checkCommitStatus(newMetadataLocation, metadata);
+      }
+
+      if (commitStatus != CommitStatus.SUCCESS && conditionCheckFailed) {
+        throw new CommitFailedException(
+                persistFailure, "Cannot commit %s: concurrent update detected", tableName());
+      }
+
+      switch (commitStatus) {
+        case SUCCESS:
+          fileLogs.add(new File2(newMetadataLocation, File2.File2Type.ADD, "metadata"));
+          break;
+        case FAILURE:
+          throw new CommitFailedException(
+                  persistFailure, "Cannot commit %s due to unexpected exception", tableName());
         case UNKNOWN:
           throw new CommitStateUnknownException(persistFailure);
       }

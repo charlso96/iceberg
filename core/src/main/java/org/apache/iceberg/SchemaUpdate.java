@@ -473,6 +473,12 @@ class SchemaUpdate implements UpdateSchema {
     ops.commit(base, update);
   }
 
+  @Override
+  public void commit2(List<File2> fileLogs) {
+    TableMetadata update = applyChangesToMetadata(base.updateSchema(apply()));
+    ops.commit2(base, update, fileLogs);
+  }
+
   private int assignNewColumnId() {
     int next = lastColumnId + 1;
     this.lastColumnId = next;

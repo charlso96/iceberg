@@ -18,6 +18,7 @@
  */
 package org.apache.iceberg;
 
+import java.util.List;
 import org.apache.iceberg.exceptions.CommitFailedException;
 import org.apache.iceberg.exceptions.ValidationException;
 
@@ -137,6 +138,8 @@ public interface Transaction {
    */
   DeleteFiles newDelete();
 
+  List<File2> fileLogs();
+
   /**
    * Create a new {@link UpdateStatistics update table statistics API} to add or remove statistics
    * files in this table.
@@ -183,4 +186,5 @@ public interface Transaction {
    * @throws CommitFailedException If the updates cannot be committed due to conflicts.
    */
   void commitTransaction();
+  void commitTransaction2();
 }

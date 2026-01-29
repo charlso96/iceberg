@@ -357,6 +357,28 @@ class RemoveSnapshots implements ExpireSnapshots {
     }
   }
 
+  @Override
+  public void commit2(List<File2> fileLogs) {
+    Tasks.foreach(ops)
+            .retry(base.propertyAsInt(COMMIT_NUM_RETRIES, COMMIT_NUM_RETRIES_DEFAULT))
+            .exponentialBackoff(
+                    base.propertyAsInt(COMMIT_MIN_RETRY_WAIT_MS, COMMIT_MIN_RETRY_WAIT_MS_DEFAULT),
+                    base.propertyAsInt(COMMIT_MAX_RETRY_WAIT_MS, COMMIT_MAX_RETRY_WAIT_MS_DEFAULT),
+                    base.propertyAsInt(COMMIT_TOTAL_RETRY_TIME_MS, COMMIT_TOTAL_RETRY_TIME_MS_DEFAULT),
+                    2.0 /* exponential */)
+            .onlyRetryOn(CommitFailedException.class)
+            .run(
+                    item -> {
+                      TableMetadata updated = internalApply();
+                      ops.commit2(base, updated, fileLogs);
+                    });
+    LOG.info("Committed snapshot changes");
+
+    if (cleanExpiredFiles && !base.snapshots().isEmpty()) {
+      cleanExpiredSnapshots();
+    }
+  }
+
   ExpireSnapshots withIncrementalCleanup(boolean useIncrementalCleanup) {
     this.incrementalCleanup = useIncrementalCleanup;
     return this;

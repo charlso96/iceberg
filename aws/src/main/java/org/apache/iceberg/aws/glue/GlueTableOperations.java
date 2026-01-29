@@ -18,12 +18,14 @@
  */
 package org.apache.iceberg.aws.glue;
 
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import org.apache.iceberg.BaseMetastoreTableOperations;
 import org.apache.iceberg.CatalogProperties;
 import org.apache.iceberg.CatalogUtil;
+import org.apache.iceberg.File2;
 import org.apache.iceberg.LockManager;
 import org.apache.iceberg.TableMetadata;
 import org.apache.iceberg.aws.AwsProperties;
@@ -186,6 +188,61 @@ class GlueTableOperations extends BaseMetastoreTableOperations {
         case FAILURE:
           throw new CommitFailedException(
               persistFailure, "Cannot commit %s due to unexpected exception", tableName());
+        case UNKNOWN:
+          throw new CommitStateUnknownException(persistFailure);
+      }
+    } finally {
+      cleanupMetadataAndUnlock(commitStatus, newMetadataLocation);
+      cleanupGlueTempTableIfNecessary(glueTempTableCreated, commitStatus);
+    }
+  }
+
+  @Override
+  protected void doCommit2(TableMetadata base, TableMetadata metadata, List<File2> fileLogs) {
+    CommitStatus commitStatus = CommitStatus.FAILURE;
+    RetryDetector retryDetector = new RetryDetector();
+
+    String newMetadataLocation = null;
+    boolean glueTempTableCreated = false;
+    try {
+      glueTempTableCreated = createGlueTempTableIfNecessary(base, metadata.location());
+
+      boolean newTable = base == null;
+      newMetadataLocation = writeNewMetadataIfRequired(newTable, metadata);
+      lock(newMetadataLocation);
+      Table glueTable = getGlueTable();
+      checkMetadataLocation(glueTable, base);
+      Map<String, String> properties = prepareProperties(glueTable, newMetadataLocation);
+      persistGlueTable(glueTable, properties, metadata, retryDetector);
+      commitStatus = CommitStatus.SUCCESS;
+    } catch (CommitFailedException e) {
+      throw e;
+    } catch (RuntimeException persistFailure) {
+      boolean isAwsServiceException = persistFailure instanceof AwsServiceException;
+
+      // If we got an exception we weren't expecting, or we got an AWS service exception
+      // but retries were performed, attempt to reconcile the actual commit status.
+      if (!isAwsServiceException || retryDetector.retried()) {
+        LOG.warn(
+                "Received unexpected failure when committing to {}, validating if commit ended up succeeding.",
+                fullTableName,
+                persistFailure);
+        commitStatus = checkCommitStatus(newMetadataLocation, metadata);
+      }
+
+      // If we got an AWS exception we would usually handle, but find we
+      // succeeded on a retry that threw an exception, skip the exception.
+      if (commitStatus != CommitStatus.SUCCESS && isAwsServiceException) {
+        handleAWSExceptions((AwsServiceException) persistFailure);
+      }
+
+      switch (commitStatus) {
+        case SUCCESS:
+          fileLogs.add(new File2(newMetadataLocation, File2.File2Type.ADD, "metadata"));
+          break;
+        case FAILURE:
+          throw new CommitFailedException(
+                  persistFailure, "Cannot commit %s due to unexpected exception", tableName());
         case UNKNOWN:
           throw new CommitStateUnknownException(persistFailure);
       }

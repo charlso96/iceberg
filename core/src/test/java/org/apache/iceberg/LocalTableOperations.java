@@ -19,6 +19,7 @@
 package org.apache.iceberg;
 
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 import org.apache.iceberg.io.FileIO;
 import org.apache.iceberg.io.LocationProvider;
@@ -48,6 +49,11 @@ class LocalTableOperations implements TableOperations {
 
   @Override
   public void commit(TableMetadata base, TableMetadata metadata) {
+    throw new UnsupportedOperationException("Not implemented for tests");
+  }
+
+  @Override
+  public void commit2(TableMetadata base, TableMetadata metadata, List<File2> fileLogs) {
     throw new UnsupportedOperationException("Not implemented for tests");
   }
 

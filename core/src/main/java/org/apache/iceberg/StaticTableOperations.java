@@ -18,6 +18,7 @@
  */
 package org.apache.iceberg;
 
+import java.util.List;
 import org.apache.iceberg.io.FileIO;
 import org.apache.iceberg.io.LocationProvider;
 
@@ -77,6 +78,11 @@ public class StaticTableOperations implements TableOperations {
 
   @Override
   public void commit(TableMetadata base, TableMetadata metadata) {
+    throw new UnsupportedOperationException("Cannot modify a static table");
+  }
+
+  @Override
+  public void commit2(TableMetadata base, TableMetadata metadata, List<File2> fileLogs) {
     throw new UnsupportedOperationException("Cannot modify a static table");
   }
 

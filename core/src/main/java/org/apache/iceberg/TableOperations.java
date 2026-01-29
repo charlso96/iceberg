@@ -18,6 +18,7 @@
  */
 package org.apache.iceberg;
 
+import java.util.List;
 import org.apache.iceberg.encryption.EncryptionManager;
 import org.apache.iceberg.encryption.PlaintextEncryptionManager;
 import org.apache.iceberg.exceptions.CleanableFailure;
@@ -62,6 +63,7 @@ public interface TableOperations {
    * @param metadata new table metadata with updates
    */
   void commit(TableMetadata base, TableMetadata metadata);
+  void commit2(TableMetadata base, TableMetadata metadata, List<File2> fileLogs);
 
   /** Returns a {@link FileIO} to read and write table data and metadata files. */
   FileIO io();

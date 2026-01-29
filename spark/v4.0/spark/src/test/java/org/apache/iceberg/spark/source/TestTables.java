@@ -19,8 +19,10 @@
 package org.apache.iceberg.spark.source;
 
 import java.io.File;
+import java.util.List;
 import java.util.Map;
 import org.apache.iceberg.BaseTable;
+import org.apache.iceberg.File2;
 import org.apache.iceberg.Files;
 import org.apache.iceberg.LocationProviders;
 import org.apache.iceberg.PartitionSpec;
@@ -158,6 +160,28 @@ class TestTables {
         } else {
           throw new CommitFailedException(
               "Commit failed: table was updated at %d", base.lastUpdatedMillis());
+        }
+      }
+    }
+
+    @Override
+    public void commit2(TableMetadata base, TableMetadata metadata, List<File2> fileLogs) {
+      if (base != current) {
+        throw new CommitFailedException("Cannot commit changes based on stale metadata");
+      }
+      synchronized (METADATA) {
+        refresh();
+        if (base == current) {
+          if (failCommits > 0) {
+            this.failCommits -= 1;
+            throw new CommitFailedException("Injected failure");
+          }
+          METADATA.put(tableName, metadata);
+          this.current = metadata;
+          fileLogs.add(new File2(metadata.metadataFileLocation(), File2.File2Type.ADD, "metadata"));
+        } else {
+          throw new CommitFailedException(
+                  "Commit failed: table was updated at %d", base.lastUpdatedMillis());
         }
       }
     }

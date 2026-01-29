@@ -18,6 +18,7 @@
  */
 package org.apache.iceberg;
 
+import java.util.List;
 import java.util.Map;
 import org.apache.iceberg.relocated.com.google.common.base.Preconditions;
 import org.apache.iceberg.relocated.com.google.common.collect.Maps;
@@ -48,6 +49,12 @@ class UpdateSnapshotReferencesOperation implements PendingUpdate<Map<String, Sna
   public void commit() {
     TableMetadata updated = internalApply();
     ops.commit(base, updated);
+  }
+
+  @Override
+  public void commit2(List<File2> fileLogs) {
+    TableMetadata updated = internalApply();
+    ops.commit2(base, updated, fileLogs);
   }
 
   public UpdateSnapshotReferencesOperation createBranch(String name, long snapshotId) {

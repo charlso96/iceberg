@@ -123,4 +123,19 @@ public class BaseReplacePartitions extends MergingSnapshotProducer<ReplacePartit
           "Cannot commit file that conflicts with existing partition: %s", e.partition());
     }
   }
+
+  @Override
+  public List<ManifestFile> apply2(TableMetadata base, Snapshot snapshot, List<File2> fileLogs) {
+    if (dataSpec().isUnpartitioned()) {
+      // replace all data in an unpartitioned table
+      deleteByRowFilter(Expressions.alwaysTrue());
+    }
+
+    try {
+      return super.apply2(base, snapshot, fileLogs);
+    } catch (ManifestFilterManager.DeleteException e) {
+      throw new ValidationException(
+              "Cannot commit file that conflicts with existing partition: %s", e.partition());
+    }
+  }
 }

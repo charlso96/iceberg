@@ -195,6 +195,45 @@ public class BaseRewriteManifests extends SnapshotProducer<RewriteManifests>
   }
 
   @Override
+  public List<ManifestFile> apply2(TableMetadata base, Snapshot snapshot, List<File2> fileLogs) {
+    List<ManifestFile> currentManifests = base.currentSnapshot().allManifests(ops().io());
+    Set<ManifestFile> currentManifestSet = ImmutableSet.copyOf(currentManifests);
+
+    validateDeletedManifests(currentManifestSet, base.currentSnapshot().snapshotId());
+
+    if (requiresRewrite(currentManifestSet)) {
+      performRewrite(currentManifests);
+    } else {
+      keepActiveManifests(currentManifests);
+    }
+
+    validateFilesCounts();
+
+    Iterable<ManifestFile> newManifestsWithMetadata =
+            Iterables.transform(
+                    Iterables.concat(newManifests, addedManifests, rewrittenAddedManifests),
+                    manifest -> GenericManifestFile.copyOf(manifest).withSnapshotId(snapshotId()).build());
+
+    // put new manifests at the beginning
+    List<ManifestFile> apply = Lists.newArrayList();
+    Iterables.addAll(apply, newManifestsWithMetadata);
+    apply.addAll(keptManifests);
+
+    newManifests.forEach( manifest -> fileLogs.add(
+            new File2(manifest.path(), File2.File2Type.ADD, "manifest")));
+    addedManifests.forEach( manifest -> fileLogs.add(
+            new File2(manifest.path(), File2.File2Type.ADD, "manifest")));
+    rewrittenAddedManifests.forEach( manifest -> fileLogs.add(
+            new File2(manifest.path(), File2.File2Type.ADD, "manifest")));
+    rewrittenManifests.forEach( manifest -> fileLogs.add(
+            new File2(manifest.path(), File2.File2Type.DELETE, "manifest")));
+    deletedManifests.forEach( manifest -> fileLogs.add(
+            new File2(manifest.path(), File2.File2Type.DELETE, "manifest")));
+
+    return apply;
+  }
+
+  @Override
   public Object updateEvent() {
     long snapshotId = snapshotId();
     Snapshot snapshot = ops().current().snapshot(snapshotId);

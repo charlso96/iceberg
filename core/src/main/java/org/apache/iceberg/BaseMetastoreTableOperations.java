@@ -18,6 +18,7 @@
  */
 package org.apache.iceberg;
 
+import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
@@ -133,7 +134,40 @@ public abstract class BaseMetastoreTableOperations extends BaseMetastoreOperatio
         System.currentTimeMillis() - start);
   }
 
+  @Override
+  public void commit2(TableMetadata base, TableMetadata metadata, List<File2> fileLogs) {
+    // if the metadata is already out of date, reject it
+    if (base != current()) {
+      if (base != null) {
+        throw new CommitFailedException("Cannot commit: stale table metadata");
+      } else {
+        // when current is non-null, the table exists. but when base is null, the commit is trying
+        // to create the table
+        throw new AlreadyExistsException("Table already exists: %s", tableName());
+      }
+    }
+    // if the metadata is not changed, return early
+    if (base == metadata) {
+      LOG.info("Nothing to commit.");
+      return;
+    }
+
+    long start = System.currentTimeMillis();
+    doCommit2(base, metadata, fileLogs);
+    CatalogUtil.deleteRemovedMetadataFiles(io(), base, metadata);
+    requestRefresh();
+
+    LOG.info(
+            "Successfully committed to table {} in {} ms",
+            tableName(),
+            System.currentTimeMillis() - start);
+  }
+
   protected void doCommit(TableMetadata base, TableMetadata metadata) {
+    throw new UnsupportedOperationException("Not implemented: doCommit");
+  }
+
+  protected void doCommit2(TableMetadata base, TableMetadata metadata, List<File2> fileLogs) {
     throw new UnsupportedOperationException("Not implemented: doCommit");
   }
 
@@ -250,6 +284,11 @@ public abstract class BaseMetastoreTableOperations extends BaseMetastoreOperatio
 
       @Override
       public void commit(TableMetadata base, TableMetadata metadata) {
+        throw new UnsupportedOperationException("Cannot call commit on temporary table operations");
+      }
+
+      @Override
+      public void commit2(TableMetadata base, TableMetadata metadata, List<File2> fileLogs) {
         throw new UnsupportedOperationException("Cannot call commit on temporary table operations");
       }
 

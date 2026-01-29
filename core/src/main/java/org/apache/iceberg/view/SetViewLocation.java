@@ -27,6 +27,8 @@ import static org.apache.iceberg.TableProperties.COMMIT_NUM_RETRIES_DEFAULT;
 import static org.apache.iceberg.TableProperties.COMMIT_TOTAL_RETRY_TIME_MS;
 import static org.apache.iceberg.TableProperties.COMMIT_TOTAL_RETRY_TIME_MS_DEFAULT;
 
+import java.util.List;
+import org.apache.iceberg.File2;
 import org.apache.iceberg.UpdateLocation;
 import org.apache.iceberg.exceptions.CommitFailedException;
 import org.apache.iceberg.relocated.com.google.common.base.Preconditions;
@@ -66,6 +68,27 @@ class SetViewLocation implements UpdateLocation {
         .run(
             taskOps ->
                 taskOps.commit(base, ViewMetadata.buildFrom(base).setLocation(apply()).build()));
+  }
+
+  @Override
+  public void commit2(List<File2> fileLogs) {
+    ViewMetadata base = ops.refresh();
+    Tasks.foreach(ops)
+            .retry(
+                    PropertyUtil.propertyAsInt(
+                            base.properties(), COMMIT_NUM_RETRIES, COMMIT_NUM_RETRIES_DEFAULT))
+            .exponentialBackoff(
+                    PropertyUtil.propertyAsInt(
+                            base.properties(), COMMIT_MIN_RETRY_WAIT_MS, COMMIT_MIN_RETRY_WAIT_MS_DEFAULT),
+                    PropertyUtil.propertyAsInt(
+                            base.properties(), COMMIT_MAX_RETRY_WAIT_MS, COMMIT_MAX_RETRY_WAIT_MS_DEFAULT),
+                    PropertyUtil.propertyAsInt(
+                            base.properties(), COMMIT_TOTAL_RETRY_TIME_MS, COMMIT_TOTAL_RETRY_TIME_MS_DEFAULT),
+                    2.0 /* exponential */)
+            .onlyRetryOn(CommitFailedException.class)
+            .run(
+                    taskOps ->
+                            taskOps.commit(base, ViewMetadata.buildFrom(base).setLocation(apply()).build()));
   }
 
   @Override

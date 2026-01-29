@@ -217,6 +217,11 @@ public class TestSnapshotLoading extends TestBase {
     }
 
     @Override
+    public void commit2(TableMetadata base, TableMetadata metadata, List<File2> fileLogs) {
+      throw new UnsupportedOperationException("commit not supported for test ops implementation.");
+    }
+
+    @Override
     public FileIO io() {
       return io;
     }
