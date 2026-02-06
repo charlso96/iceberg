@@ -181,7 +181,7 @@ class TestTables {
           fileLogs.add(new File2(metadata.metadataFileLocation(), File2.File2Type.ADD, "metadata"));
         } else {
           throw new CommitFailedException(
-                  "Commit failed: table was updated at %d", base.lastUpdatedMillis());
+              "Commit failed: table was updated at %d", base.lastUpdatedMillis());
         }
       }
     }

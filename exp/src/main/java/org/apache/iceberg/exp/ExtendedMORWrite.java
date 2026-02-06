@@ -186,12 +186,12 @@ public class ExtendedMORWrite {
       stmt.execute("INSTALL parquet; LOAD parquet;");
       String secretSql =
           """
-                CREATE SECRET IF NOT EXISTS s3_secret (
-                    TYPE S3,
-                    KEY_ID '%s',
-                    SECRET '%s',
-                    REGION '%s'
-                );"""
+          CREATE SECRET IF NOT EXISTS s3_secret (
+              TYPE S3,
+              KEY_ID '%s',
+              SECRET '%s',
+              REGION '%s'
+          );"""
               .formatted(S3_KEY_ID, S3_SECRET, S3_REGION);
       stmt.execute(secretSql);
     }
@@ -280,11 +280,11 @@ public class ExtendedMORWrite {
           // generate data
           stmt.execute(
               """
-                        CREATE TEMP TABLE staging_data AS
-                        SELECT
-                            %s
-                        FROM generate_series(1, %d) AS t(x);
-                    """
+                  CREATE TEMP TABLE staging_data AS
+                  SELECT
+                      %s
+                  FROM generate_series(1, %d) AS t(x);
+              """
                   .formatted(targetList, NUM_ROWS_PER_FILE));
 
           // construct file statistics
@@ -295,9 +295,9 @@ public class ExtendedMORWrite {
               Path.of(table.location()).resolve(UUID.randomUUID().toString()).toString();
           stmt.execute(
               """
-                        COPY staging_data
-                        TO '%s' (FORMAT PARQUET);
-                    """
+                  COPY staging_data
+                  TO '%s' (FORMAT PARQUET);
+              """
                   .formatted(file_path));
 
           stmt.execute("DROP TABLE staging_data;");

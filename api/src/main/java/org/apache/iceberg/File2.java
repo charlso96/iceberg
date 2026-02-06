@@ -24,13 +24,25 @@ public class File2 {
     DELETE
   }
 
-  public final String path;
-  public final File2Type fileType;
-  public final String tag;
+  private final String path;
+  private final File2Type fileType;
+  private final String tag;
 
   public File2(String path, File2Type fileType, String tag) {
     this.path = path;
     this.fileType = fileType;
     this.tag = tag;
+  }
+
+  public String path() {
+    return path;
+  }
+
+  public File2Type fileType() {
+    return fileType;
+  }
+
+  public String tag() {
+    return tag;
   }
 }

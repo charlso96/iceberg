@@ -124,11 +124,11 @@ public class EcsTableOperations extends BaseMetastoreTableOperations {
       Preconditions.checkNotNull(cachedETag, "E-Tag must be not null when update table");
       // replace to a new version, the E-Tag should be present and matched
       boolean result =
-              catalog.updatePropertiesObject(
-                      tableObject, cachedETag, buildProperties(newMetadataLocation));
+          catalog.updatePropertiesObject(
+              tableObject, cachedETag, buildProperties(newMetadataLocation));
       if (!result) {
         throw new CommitFailedException(
-                "Replace failed, E-Tag %s mismatch for table %s", cachedETag, tableName());
+            "Replace failed, E-Tag %s mismatch for table %s", cachedETag, tableName());
       }
     }
 
