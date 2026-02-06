@@ -177,17 +177,17 @@ class FastAppend extends SnapshotProducer<AppendFiles> implements AppendFiles {
       List<ManifestFile> newWrittenManifests = writeNewManifests();
       if (newWrittenManifests != null) {
         manifests.addAll(newWrittenManifests);
-        newWrittenManifests.forEach(manifest -> fileLogs.add(new File2(manifest.path(), File2.File2Type.ADD,
-                "manifest")));
+        newWrittenManifests.forEach(
+            manifest -> fileLogs.add(new File2(manifest.path(), File2.File2Type.ADD, "manifest")));
       }
     } catch (IOException e) {
       throw new RuntimeIOException(e, "Failed to write manifest");
     }
 
     Iterable<ManifestFile> appendManifestsWithMetadata =
-            Iterables.transform(
-                    Iterables.concat(appendManifests, rewrittenAppendManifests),
-                    manifest -> GenericManifestFile.copyOf(manifest).withSnapshotId(snapshotId()).build());
+        Iterables.transform(
+            Iterables.concat(appendManifests, rewrittenAppendManifests),
+            manifest -> GenericManifestFile.copyOf(manifest).withSnapshotId(snapshotId()).build());
     Iterables.addAll(manifests, appendManifestsWithMetadata);
 
     if (snapshot != null) {

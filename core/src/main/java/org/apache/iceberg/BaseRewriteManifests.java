@@ -210,25 +210,25 @@ public class BaseRewriteManifests extends SnapshotProducer<RewriteManifests>
     validateFilesCounts();
 
     Iterable<ManifestFile> newManifestsWithMetadata =
-            Iterables.transform(
-                    Iterables.concat(newManifests, addedManifests, rewrittenAddedManifests),
-                    manifest -> GenericManifestFile.copyOf(manifest).withSnapshotId(snapshotId()).build());
+        Iterables.transform(
+            Iterables.concat(newManifests, addedManifests, rewrittenAddedManifests),
+            manifest -> GenericManifestFile.copyOf(manifest).withSnapshotId(snapshotId()).build());
 
     // put new manifests at the beginning
     List<ManifestFile> apply = Lists.newArrayList();
     Iterables.addAll(apply, newManifestsWithMetadata);
     apply.addAll(keptManifests);
 
-    newManifests.forEach( manifest -> fileLogs.add(
-            new File2(manifest.path(), File2.File2Type.ADD, "manifest")));
-    addedManifests.forEach( manifest -> fileLogs.add(
-            new File2(manifest.path(), File2.File2Type.ADD, "manifest")));
-    rewrittenAddedManifests.forEach( manifest -> fileLogs.add(
-            new File2(manifest.path(), File2.File2Type.ADD, "manifest")));
-    rewrittenManifests.forEach( manifest -> fileLogs.add(
-            new File2(manifest.path(), File2.File2Type.DELETE, "manifest")));
-    deletedManifests.forEach( manifest -> fileLogs.add(
-            new File2(manifest.path(), File2.File2Type.DELETE, "manifest")));
+    newManifests.forEach(
+        manifest -> fileLogs.add(new File2(manifest.path(), File2.File2Type.ADD, "manifest")));
+    addedManifests.forEach(
+        manifest -> fileLogs.add(new File2(manifest.path(), File2.File2Type.ADD, "manifest")));
+    rewrittenAddedManifests.forEach(
+        manifest -> fileLogs.add(new File2(manifest.path(), File2.File2Type.ADD, "manifest")));
+    rewrittenManifests.forEach(
+        manifest -> fileLogs.add(new File2(manifest.path(), File2.File2Type.DELETE, "manifest")));
+    deletedManifests.forEach(
+        manifest -> fileLogs.add(new File2(manifest.path(), File2.File2Type.DELETE, "manifest")));
 
     return apply;
   }

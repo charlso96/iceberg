@@ -139,32 +139,32 @@ class SetSnapshotOperation implements PendingUpdate<Snapshot> {
   @Override
   public void commit2(List<File2> fileLogs) {
     Tasks.foreach(ops)
-            .retry(base.propertyAsInt(COMMIT_NUM_RETRIES, COMMIT_NUM_RETRIES_DEFAULT))
-            .exponentialBackoff(
-                    base.propertyAsInt(COMMIT_MIN_RETRY_WAIT_MS, COMMIT_MIN_RETRY_WAIT_MS_DEFAULT),
-                    base.propertyAsInt(COMMIT_MAX_RETRY_WAIT_MS, COMMIT_MAX_RETRY_WAIT_MS_DEFAULT),
-                    base.propertyAsInt(COMMIT_TOTAL_RETRY_TIME_MS, COMMIT_TOTAL_RETRY_TIME_MS_DEFAULT),
-                    2.0 /* exponential */)
-            .onlyRetryOn(CommitFailedException.class)
-            .run(
-                    taskOps -> {
-                      Snapshot snapshot = apply();
-                      TableMetadata updated =
-                              TableMetadata.buildFrom(base)
-                                      .setBranchSnapshot(snapshot.snapshotId(), SnapshotRef.MAIN_BRANCH)
-                                      .build();
+        .retry(base.propertyAsInt(COMMIT_NUM_RETRIES, COMMIT_NUM_RETRIES_DEFAULT))
+        .exponentialBackoff(
+            base.propertyAsInt(COMMIT_MIN_RETRY_WAIT_MS, COMMIT_MIN_RETRY_WAIT_MS_DEFAULT),
+            base.propertyAsInt(COMMIT_MAX_RETRY_WAIT_MS, COMMIT_MAX_RETRY_WAIT_MS_DEFAULT),
+            base.propertyAsInt(COMMIT_TOTAL_RETRY_TIME_MS, COMMIT_TOTAL_RETRY_TIME_MS_DEFAULT),
+            2.0 /* exponential */)
+        .onlyRetryOn(CommitFailedException.class)
+        .run(
+            taskOps -> {
+              Snapshot snapshot = apply();
+              TableMetadata updated =
+                  TableMetadata.buildFrom(base)
+                      .setBranchSnapshot(snapshot.snapshotId(), SnapshotRef.MAIN_BRANCH)
+                      .build();
 
-                      // Do commit this operation even if the metadata has not changed, as we need to
-                      // advance the hasLastOpCommited for the transaction's commit to work properly.
-                      // (Without any other operations in the transaction, the commitTransaction() call
-                      // will be a no-op anyway)
+              // Do commit this operation even if the metadata has not changed, as we need to
+              // advance the hasLastOpCommited for the transaction's commit to work properly.
+              // (Without any other operations in the transaction, the commitTransaction() call
+              // will be a no-op anyway)
 
-                      // if the table UUID is missing, add it here. the UUID will be re-created each time
-                      // this operation retries
-                      // to ensure that if a concurrent operation assigns the UUID, this operation will not
-                      // fail.
-                      taskOps.commit2(base, updated.withUUID(), fileLogs);
-                    });
+              // if the table UUID is missing, add it here. the UUID will be re-created each time
+              // this operation retries
+              // to ensure that if a concurrent operation assigns the UUID, this operation will not
+              // fail.
+              taskOps.commit2(base, updated.withUUID(), fileLogs);
+            });
   }
 
   /**

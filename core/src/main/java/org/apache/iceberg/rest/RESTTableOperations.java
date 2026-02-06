@@ -174,12 +174,12 @@ class RESTTableOperations implements TableOperations {
     switch (updateType) {
       case CREATE:
         Preconditions.checkState(
-                base == null, "Invalid base metadata for create transaction, expected null: %s", base);
+            base == null, "Invalid base metadata for create transaction, expected null: %s", base);
         updates =
-                ImmutableList.<MetadataUpdate>builder()
-                        .addAll(createChanges)
-                        .addAll(metadata.changes())
-                        .build();
+            ImmutableList.<MetadataUpdate>builder()
+                .addAll(createChanges)
+                .addAll(metadata.changes())
+                .build();
         requirements = UpdateRequirements.forCreateTable(updates);
         errorHandler = ErrorHandlers.tableErrorHandler(); // throws NoSuchTableException
         break;
@@ -187,10 +187,10 @@ class RESTTableOperations implements TableOperations {
       case REPLACE:
         Preconditions.checkState(base != null, "Invalid base metadata: null");
         updates =
-                ImmutableList.<MetadataUpdate>builder()
-                        .addAll(createChanges)
-                        .addAll(metadata.changes())
-                        .build();
+            ImmutableList.<MetadataUpdate>builder()
+                .addAll(createChanges)
+                .addAll(metadata.changes())
+                .build();
         // use the original replace base metadata because the transaction will refresh
         requirements = UpdateRequirements.forReplaceTable(replaceBase, updates);
         errorHandler = ErrorHandlers.tableCommitHandler();
@@ -205,7 +205,7 @@ class RESTTableOperations implements TableOperations {
 
       default:
         throw new UnsupportedOperationException(
-                String.format("Update type %s is not supported", updateType));
+            String.format("Update type %s is not supported", updateType));
     }
 
     UpdateTableRequest request = new UpdateTableRequest(requirements, updates);
@@ -214,7 +214,7 @@ class RESTTableOperations implements TableOperations {
     // UnknownCommitStateException
     // TODO: ensure that the HTTP client lib passes HTTP client errors to the error handler
     LoadTableResponse response =
-            client.post(path, request, LoadTableResponse.class, headers, errorHandler);
+        client.post(path, request, LoadTableResponse.class, headers, errorHandler);
 
     // all future commits should be simple commits
     this.updateType = UpdateType.SIMPLE;

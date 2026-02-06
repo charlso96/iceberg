@@ -157,7 +157,7 @@ class JdbcTableOperations extends BaseMetastoreTableOperations {
     String newMetadataLocation = writeNewMetadataIfRequired(newTable, metadata);
     try {
       Map<String, String> table =
-              JdbcUtil.loadTable(schemaVersion, connections, catalogName, tableIdentifier);
+          JdbcUtil.loadTable(schemaVersion, connections, catalogName, tableIdentifier);
 
       if (base != null) {
         validateMetadataLocation(table, base);

@@ -25,81 +25,81 @@ import org.apache.hadoop.hive.metastore.api.Database;
 import org.apache.iceberg.relocated.com.google.common.collect.Maps;
 
 public class ExpCatalogExtension {
-    private HiveMetaStoreClient metastoreClient;
-    private ExpCatalog metastore;
-    private final Map<String, String> hiveConfOverride;
-    private final String databaseName;
+  private HiveMetaStoreClient metastoreClient;
+  private ExpCatalog metastore;
+  private final Map<String, String> hiveConfOverride;
+  private final String databaseName;
 
-    private ExpCatalogExtension(String databaseName, Map<String, String> hiveConfOverride) {
-        this.databaseName = databaseName;
-        this.hiveConfOverride = hiveConfOverride;
+  private ExpCatalogExtension(String databaseName, Map<String, String> hiveConfOverride) {
+    this.databaseName = databaseName;
+    this.hiveConfOverride = hiveConfOverride;
+  }
+
+  public void beforeAll() throws Exception {
+    metastore = new ExpCatalog();
+    HiveConf hiveConfWithOverrides = new HiveConf(ExpCatalog.class);
+    if (hiveConfOverride != null) {
+      for (Map.Entry<String, String> kv : hiveConfOverride.entrySet()) {
+        hiveConfWithOverrides.set(kv.getKey(), kv.getValue());
+      }
     }
 
-    public void beforeAll() throws Exception {
-        metastore = new ExpCatalog();
-        HiveConf hiveConfWithOverrides = new HiveConf(ExpCatalog.class);
-        if (hiveConfOverride != null) {
-            for (Map.Entry<String, String> kv : hiveConfOverride.entrySet()) {
-                hiveConfWithOverrides.set(kv.getKey(), kv.getValue());
-            }
-        }
+    metastore.start(hiveConfWithOverrides, 5, true);
+    metastoreClient = new HiveMetaStoreClient(hiveConfWithOverrides);
+    if (null != databaseName) {
+      String dbPath = metastore.getDatabasePath(databaseName);
+      Database db = new Database(databaseName, "description", dbPath, Maps.newHashMap());
+      metastoreClient.createDatabase(db);
+    }
+  }
 
-        metastore.start(hiveConfWithOverrides, 5, true);
-        metastoreClient = new HiveMetaStoreClient(hiveConfWithOverrides);
-        if (null != databaseName) {
-            String dbPath = metastore.getDatabasePath(databaseName);
-            Database db = new Database(databaseName, "description", dbPath, Maps.newHashMap());
-            metastoreClient.createDatabase(db);
-        }
+  public void afterAll() throws Exception {
+    if (null != metastoreClient) {
+      metastoreClient.close();
     }
 
-    public void afterAll() throws Exception {
-        if (null != metastoreClient) {
-            metastoreClient.close();
-        }
-
-        if (null != metastore) {
-            metastore.stop();
-        }
-
-        metastoreClient = null;
-        metastore = null;
+    if (null != metastore) {
+      metastore.stop();
     }
 
-    public HiveMetaStoreClient metastoreClient() {
-        return metastoreClient;
+    metastoreClient = null;
+    metastore = null;
+  }
+
+  public HiveMetaStoreClient metastoreClient() {
+    return metastoreClient;
+  }
+
+  public HiveConf hiveConf() {
+    return metastore.hiveConf();
+  }
+
+  public ExpCatalog metastore() {
+    return metastore;
+  }
+
+  public static Builder builder() {
+    return new Builder();
+  }
+
+  public static class Builder {
+    private String databaseName;
+    private Map<String, String> config;
+
+    public Builder() {}
+
+    public Builder withDatabase(String databaseToCreate) {
+      this.databaseName = databaseToCreate;
+      return this;
     }
 
-    public HiveConf hiveConf() {
-        return metastore.hiveConf();
+    public Builder withConfig(Map<String, String> configToSet) {
+      this.config = configToSet;
+      return this;
     }
 
-    public ExpCatalog metastore() {
-        return metastore;
+    public ExpCatalogExtension build() {
+      return new ExpCatalogExtension(databaseName, config);
     }
-
-    public static Builder builder() {
-        return new Builder();
-    }
-
-    public static class Builder {
-        private String databaseName;
-        private Map<String, String> config;
-
-        public Builder() {}
-
-        public Builder withDatabase(String databaseToCreate) {
-            this.databaseName = databaseToCreate;
-            return this;
-        }
-
-        public Builder withConfig(Map<String, String> configToSet) {
-            this.config = configToSet;
-            return this;
-        }
-
-        public ExpCatalogExtension build() {
-            return new ExpCatalogExtension(databaseName, config);
-        }
-    }
+  }
 }

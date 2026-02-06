@@ -54,6 +54,7 @@ public interface PendingUpdate<T> {
    *     should be done in this case.
    */
   void commit();
+
   void commit2(List<File2> fileLogs);
 
   /**

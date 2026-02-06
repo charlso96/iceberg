@@ -172,12 +172,12 @@ class DynamoDbTableOperations extends BaseMetastoreTableOperations {
     Map<String, AttributeValue> tableKey = DynamoDbCatalog.tablePrimaryKey(tableIdentifier);
     try {
       GetItemResponse table =
-              dynamo.getItem(
-                      GetItemRequest.builder()
-                              .tableName(awsProperties.dynamoDbTableName())
-                              .consistentRead(true)
-                              .key(tableKey)
-                              .build());
+          dynamo.getItem(
+              GetItemRequest.builder()
+                  .tableName(awsProperties.dynamoDbTableName())
+                  .consistentRead(true)
+                  .key(tableKey)
+                  .build());
       checkMetadataLocation(table, base);
       Map<String, String> properties = prepareProperties(table, newMetadataLocation);
       persistTable(tableKey, table, properties, retryDetector);
@@ -192,15 +192,15 @@ class DynamoDbTableOperations extends BaseMetastoreTableOperations {
       // but retries were performed, attempt to reconcile the actual commit status.
       if (!conditionCheckFailed || retryDetector.retried()) {
         LOG.warn(
-                "Received unexpected failure when committing to {}, validating if commit ended up succeeding.",
-                fullTableName,
-                persistFailure);
+            "Received unexpected failure when committing to {}, validating if commit ended up succeeding.",
+            fullTableName,
+            persistFailure);
         commitStatus = checkCommitStatus(newMetadataLocation, metadata);
       }
 
       if (commitStatus != CommitStatus.SUCCESS && conditionCheckFailed) {
         throw new CommitFailedException(
-                persistFailure, "Cannot commit %s: concurrent update detected", tableName());
+            persistFailure, "Cannot commit %s: concurrent update detected", tableName());
       }
 
       switch (commitStatus) {
@@ -209,7 +209,7 @@ class DynamoDbTableOperations extends BaseMetastoreTableOperations {
           break;
         case FAILURE:
           throw new CommitFailedException(
-                  persistFailure, "Cannot commit %s due to unexpected exception", tableName());
+              persistFailure, "Cannot commit %s due to unexpected exception", tableName());
         case UNKNOWN:
           throw new CommitStateUnknownException(persistFailure);
       }

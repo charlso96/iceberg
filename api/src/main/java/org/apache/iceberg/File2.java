@@ -20,7 +20,8 @@ package org.apache.iceberg;
 
 public class File2 {
   public enum File2Type {
-    ADD, DELETE
+    ADD,
+    DELETE
   }
 
   public final String path;

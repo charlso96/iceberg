@@ -127,7 +127,9 @@ public class BaseTransaction implements Transaction {
   }
 
   @Override
-  public List<File2> fileLogs() { return fileLogs; }
+  public List<File2> fileLogs() {
+    return fileLogs;
+  }
 
   protected final <T extends PendingUpdate> T appendUpdate(T update) {
     checkLastOperationCommitted(update.getClass());
@@ -282,7 +284,7 @@ public class BaseTransaction implements Transaction {
   @Override
   public void commitTransaction2() {
     Preconditions.checkState(
-            hasLastOpCommitted, "Cannot commit transaction: last operation has not committed");
+        hasLastOpCommitted, "Cannot commit transaction: last operation has not committed");
 
     switch (type) {
       case CREATE_TABLE:
@@ -387,22 +389,22 @@ public class BaseTransaction implements Transaction {
     }
 
     Set<Long> startingSnapshots =
-            base.snapshots().stream().map(Snapshot::snapshotId).collect(Collectors.toSet());
+        base.snapshots().stream().map(Snapshot::snapshotId).collect(Collectors.toSet());
     try {
       Tasks.foreach(ops)
-              .retry(base.propertyAsInt(COMMIT_NUM_RETRIES, COMMIT_NUM_RETRIES_DEFAULT))
-              .exponentialBackoff(
-                      base.propertyAsInt(COMMIT_MIN_RETRY_WAIT_MS, COMMIT_MIN_RETRY_WAIT_MS_DEFAULT),
-                      base.propertyAsInt(COMMIT_MAX_RETRY_WAIT_MS, COMMIT_MAX_RETRY_WAIT_MS_DEFAULT),
-                      base.propertyAsInt(COMMIT_TOTAL_RETRY_TIME_MS, COMMIT_TOTAL_RETRY_TIME_MS_DEFAULT),
-                      2.0 /* exponential */)
-              .onlyRetryOn(CommitFailedException.class)
-              .run(
-                      underlyingOps -> {
-                        applyUpdates(underlyingOps);
+          .retry(base.propertyAsInt(COMMIT_NUM_RETRIES, COMMIT_NUM_RETRIES_DEFAULT))
+          .exponentialBackoff(
+              base.propertyAsInt(COMMIT_MIN_RETRY_WAIT_MS, COMMIT_MIN_RETRY_WAIT_MS_DEFAULT),
+              base.propertyAsInt(COMMIT_MAX_RETRY_WAIT_MS, COMMIT_MAX_RETRY_WAIT_MS_DEFAULT),
+              base.propertyAsInt(COMMIT_TOTAL_RETRY_TIME_MS, COMMIT_TOTAL_RETRY_TIME_MS_DEFAULT),
+              2.0 /* exponential */)
+          .onlyRetryOn(CommitFailedException.class)
+          .run(
+              underlyingOps -> {
+                applyUpdates(underlyingOps);
 
-                        underlyingOps.commit(base, current);
-                      });
+                underlyingOps.commit(base, current);
+              });
 
     } catch (CommitStateUnknownException e) {
       throw e;
@@ -436,9 +438,9 @@ public class BaseTransaction implements Transaction {
       if (committedFiles != null) {
         // delete all the files that were deleted in the most recent set of operation commits
         Set<String> uncommittedFiles =
-                deletedFiles.stream()
-                        .filter(f -> !committedFiles.contains(f))
-                        .collect(Collectors.toSet());
+            deletedFiles.stream()
+                .filter(f -> !committedFiles.contains(f))
+                .collect(Collectors.toSet());
         deleteUncommittedFiles(uncommittedFiles);
       } else {
         LOG.warn("Failed to load metadata for a committed snapshot, skipping clean-up");
@@ -456,23 +458,24 @@ public class BaseTransaction implements Transaction {
     }
 
     Set<Long> startingSnapshots =
-            base.snapshots().stream().map(Snapshot::snapshotId).collect(Collectors.toSet());
+        base.snapshots().stream().map(Snapshot::snapshotId).collect(Collectors.toSet());
     try {
       Tasks.foreach(ops)
-              .retry(base.propertyAsInt(COMMIT_NUM_RETRIES, COMMIT_NUM_RETRIES_DEFAULT))
-              .exponentialBackoff(
-                      base.propertyAsInt(COMMIT_MIN_RETRY_WAIT_MS, COMMIT_MIN_RETRY_WAIT_MS_DEFAULT),
-                      base.propertyAsInt(COMMIT_MAX_RETRY_WAIT_MS, COMMIT_MAX_RETRY_WAIT_MS_DEFAULT),
-                      base.propertyAsInt(COMMIT_TOTAL_RETRY_TIME_MS, COMMIT_TOTAL_RETRY_TIME_MS_DEFAULT),
-                      2.0 /* exponential */)
-              .onlyRetryOn(CommitFailedException.class)
-              .run(
-                      underlyingOps -> {
-                        applyUpdates2(underlyingOps);
-                        // still write the metadata file & its location since there is no easy way to reconstruct
-                        // snapshot from a single manifest list file yet.
-                        underlyingOps.commit2(base, current, fileLogs);
-                      });
+          .retry(base.propertyAsInt(COMMIT_NUM_RETRIES, COMMIT_NUM_RETRIES_DEFAULT))
+          .exponentialBackoff(
+              base.propertyAsInt(COMMIT_MIN_RETRY_WAIT_MS, COMMIT_MIN_RETRY_WAIT_MS_DEFAULT),
+              base.propertyAsInt(COMMIT_MAX_RETRY_WAIT_MS, COMMIT_MAX_RETRY_WAIT_MS_DEFAULT),
+              base.propertyAsInt(COMMIT_TOTAL_RETRY_TIME_MS, COMMIT_TOTAL_RETRY_TIME_MS_DEFAULT),
+              2.0 /* exponential */)
+          .onlyRetryOn(CommitFailedException.class)
+          .run(
+              underlyingOps -> {
+                applyUpdates2(underlyingOps);
+                // still write the metadata file & its location since there is no easy way to
+                // reconstruct
+                // snapshot from a single manifest list file yet.
+                underlyingOps.commit2(base, current, fileLogs);
+              });
 
     } catch (CommitStateUnknownException e) {
       throw e;
@@ -506,9 +509,9 @@ public class BaseTransaction implements Transaction {
       if (committedFiles != null) {
         // delete all the files that were deleted in the most recent set of operation commits
         Set<String> uncommittedFiles =
-                deletedFiles.stream()
-                        .filter(f -> !committedFiles.contains(f))
-                        .collect(Collectors.toSet());
+            deletedFiles.stream()
+                .filter(f -> !committedFiles.contains(f))
+                .collect(Collectors.toSet());
         deleteUncommittedFiles(uncommittedFiles);
       } else {
         LOG.warn("Failed to load metadata for a committed snapshot, skipping clean-up");
@@ -645,7 +648,8 @@ public class BaseTransaction implements Transaction {
 
     @Override
     @SuppressWarnings("ConsistentOverrides")
-    public void commit2(TableMetadata underlyingBase, TableMetadata metadata, List<File2> fileLogs) {
+    public void commit2(
+        TableMetadata underlyingBase, TableMetadata metadata, List<File2> fileLogs) {
       if (underlyingBase != current) {
         // trigger a refresh and retry
         throw new CommitFailedException("Table metadata refresh is required");

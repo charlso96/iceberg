@@ -452,35 +452,35 @@ public class InMemoryCatalog extends BaseMetastoreViewCatalog
       synchronized (InMemoryCatalog.this) {
         if (null == base && !namespaceExists(tableIdentifier.namespace())) {
           throw new NoSuchNamespaceException(
-                  "Cannot create table %s. Namespace does not exist: %s",
-                  tableIdentifier, tableIdentifier.namespace());
+              "Cannot create table %s. Namespace does not exist: %s",
+              tableIdentifier, tableIdentifier.namespace());
         }
 
         if (views.containsKey(tableIdentifier)) {
           throw new AlreadyExistsException(
-                  "View with same name already exists: %s", tableIdentifier);
+              "View with same name already exists: %s", tableIdentifier);
         }
 
         tables.compute(
-                tableIdentifier,
-                (k, existingLocation) -> {
-                  if (!Objects.equal(existingLocation, oldLocation)) {
-                    if (null == base) {
-                      throw new AlreadyExistsException("Table already exists: %s", tableName());
-                    }
+            tableIdentifier,
+            (k, existingLocation) -> {
+              if (!Objects.equal(existingLocation, oldLocation)) {
+                if (null == base) {
+                  throw new AlreadyExistsException("Table already exists: %s", tableName());
+                }
 
-                    if (null == existingLocation) {
-                      throw new NoSuchTableException("Table does not exist: %s", tableName());
-                    }
+                if (null == existingLocation) {
+                  throw new NoSuchTableException("Table does not exist: %s", tableName());
+                }
 
-                    throw new CommitFailedException(
-                            "Cannot commit to table %s metadata location from %s to %s "
-                                    + "because it has been concurrently modified to %s",
-                            tableIdentifier, oldLocation, newLocation, existingLocation);
-                  }
-                  fileLogs.add(new File2(newLocation, File2.File2Type.ADD, "metadata"));
-                  return newLocation;
-                });
+                throw new CommitFailedException(
+                    "Cannot commit to table %s metadata location from %s to %s "
+                        + "because it has been concurrently modified to %s",
+                    tableIdentifier, oldLocation, newLocation, existingLocation);
+              }
+              fileLogs.add(new File2(newLocation, File2.File2Type.ADD, "metadata"));
+              return newLocation;
+            });
       }
     }
 

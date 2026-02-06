@@ -224,9 +224,9 @@ class GlueTableOperations extends BaseMetastoreTableOperations {
       // but retries were performed, attempt to reconcile the actual commit status.
       if (!isAwsServiceException || retryDetector.retried()) {
         LOG.warn(
-                "Received unexpected failure when committing to {}, validating if commit ended up succeeding.",
-                fullTableName,
-                persistFailure);
+            "Received unexpected failure when committing to {}, validating if commit ended up succeeding.",
+            fullTableName,
+            persistFailure);
         commitStatus = checkCommitStatus(newMetadataLocation, metadata);
       }
 
@@ -242,7 +242,7 @@ class GlueTableOperations extends BaseMetastoreTableOperations {
           break;
         case FAILURE:
           throw new CommitFailedException(
-                  persistFailure, "Cannot commit %s due to unexpected exception", tableName());
+              persistFailure, "Cannot commit %s due to unexpected exception", tableName());
         case UNKNOWN:
           throw new CommitStateUnknownException(persistFailure);
       }

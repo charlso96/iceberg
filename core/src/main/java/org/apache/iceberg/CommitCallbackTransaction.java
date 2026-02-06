@@ -124,7 +124,9 @@ class CommitCallbackTransaction implements Transaction {
   }
 
   @Override
-  public List<File2> fileLogs() { return wrapped.fileLogs(); }
+  public List<File2> fileLogs() {
+    return wrapped.fileLogs();
+  }
 
   @Override
   public void commitTransaction() {

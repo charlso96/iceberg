@@ -366,16 +366,16 @@ public class TestTables {
           Integer version = VERSIONS.get(tableName);
           // remove changes from the committed metadata
           this.current =
-                  TableMetadata.buildFrom(updatedMetadata)
-                          .discardChanges()
-                          .withMetadataLocation((current != null) ? current.metadataFileLocation() : null)
-                          .build();
+              TableMetadata.buildFrom(updatedMetadata)
+                  .discardChanges()
+                  .withMetadataLocation((current != null) ? current.metadataFileLocation() : null)
+                  .build();
           VERSIONS.put(tableName, version == null ? 0 : version + 1);
           METADATA.put(tableName, current);
           fileLogs.add(new File2(current.metadataFileLocation(), File2.File2Type.ADD, "metadata"));
         } else {
           throw new CommitFailedException(
-                  "Commit failed: table was updated at %d", current.lastUpdatedMillis());
+              "Commit failed: table was updated at %d", current.lastUpdatedMillis());
         }
       }
     }

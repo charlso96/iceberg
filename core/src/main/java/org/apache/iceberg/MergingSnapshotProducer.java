@@ -129,7 +129,7 @@ abstract class MergingSnapshotProducer<ThisT> extends SnapshotProducer<ThisT> {
     this.mergeManager2 = new DataFileMergeManager2(targetSizeBytes, minCountToMerge, mergeEnabled);
     this.filterManager2 = new DataFileFilterManager2();
     this.deleteMergeManager2 =
-            new DeleteFileMergeManager2(targetSizeBytes, minCountToMerge, mergeEnabled);
+        new DeleteFileMergeManager2(targetSizeBytes, minCountToMerge, mergeEnabled);
     this.deleteFilterManager2 = new DeleteFileFilterManager2();
   }
 
@@ -997,18 +997,19 @@ abstract class MergingSnapshotProducer<ThisT> extends SnapshotProducer<ThisT> {
   public List<ManifestFile> apply2(TableMetadata base, Snapshot snapshot, List<File2> fileLogs) {
     // filter any existing manifests
     List<ManifestFile> filtered =
-            filterManager2.filterManifests(
-                    SnapshotUtil.schemaFor(base, targetBranch()),
-                    snapshot != null ? snapshot.dataManifests(ops().io()) : null, fileLogs);
+        filterManager2.filterManifests(
+            SnapshotUtil.schemaFor(base, targetBranch()),
+            snapshot != null ? snapshot.dataManifests(ops().io()) : null,
+            fileLogs);
     long minDataSequenceNumber =
-            filtered.stream()
-                    .map(ManifestFile::minSequenceNumber)
-                    .filter(
-                            seq ->
-                                    seq
-                                            != ManifestWriter
-                                            .UNASSIGNED_SEQ) // filter out unassigned in rewritten manifests
-                    .reduce(base.lastSequenceNumber(), Math::min);
+        filtered.stream()
+            .map(ManifestFile::minSequenceNumber)
+            .filter(
+                seq ->
+                    seq
+                        != ManifestWriter
+                            .UNASSIGNED_SEQ) // filter out unassigned in rewritten manifests
+            .reduce(base.lastSequenceNumber(), Math::min);
     deleteFilterManager2.dropDeleteFilesOlderThan(minDataSequenceNumber);
 
     // retrieve the data files to be deleted from the DataFileFilterManager and pass it to the
@@ -1017,20 +1018,21 @@ abstract class MergingSnapshotProducer<ThisT> extends SnapshotProducer<ThisT> {
     deleteFilterManager2.removeDanglingDeletesFor(filesToBeDeleted);
 
     List<ManifestFile> filteredDeletes =
-            deleteFilterManager2.filterManifests(
-                    SnapshotUtil.schemaFor(base, targetBranch()),
-                    snapshot != null ? snapshot.deleteManifests(ops().io()) : null, fileLogs);
+        deleteFilterManager2.filterManifests(
+            SnapshotUtil.schemaFor(base, targetBranch()),
+            snapshot != null ? snapshot.deleteManifests(ops().io()) : null,
+            fileLogs);
 
     // only keep manifests that have live data files or that were written by this commit
     Predicate<ManifestFile> shouldKeep =
-            manifest ->
-                    manifest.hasAddedFiles()
-                            || manifest.hasExistingFiles()
-                            || manifest.snapshotId() == snapshotId();
+        manifest ->
+            manifest.hasAddedFiles()
+                || manifest.hasExistingFiles()
+                || manifest.snapshotId() == snapshotId();
     Iterable<ManifestFile> unmergedManifests =
-            Iterables.filter(Iterables.concat(prepareNewDataManifests(), filtered), shouldKeep);
+        Iterables.filter(Iterables.concat(prepareNewDataManifests(), filtered), shouldKeep);
     Iterable<ManifestFile> unmergedDeleteManifests =
-            Iterables.filter(Iterables.concat(prepareDeleteManifests(), filteredDeletes), shouldKeep);
+        Iterables.filter(Iterables.concat(prepareDeleteManifests(), filteredDeletes), shouldKeep);
 
     // update the snapshot summary
     summaryBuilder.clear();
@@ -1041,7 +1043,8 @@ abstract class MergingSnapshotProducer<ThisT> extends SnapshotProducer<ThisT> {
 
     List<ManifestFile> manifests = Lists.newArrayList();
     Iterables.addAll(manifests, mergeManager2.mergeManifests(unmergedManifests, fileLogs));
-    Iterables.addAll(manifests, deleteMergeManager2.mergeManifests(unmergedDeleteManifests, fileLogs));
+    Iterables.addAll(
+        manifests, deleteMergeManager2.mergeManifests(unmergedDeleteManifests, fileLogs));
 
     return manifests;
   }
@@ -1288,7 +1291,7 @@ abstract class MergingSnapshotProducer<ThisT> extends SnapshotProducer<ThisT> {
   private class DataFileMergeManager2 extends ManifestMergeManager2<DataFile> {
     DataFileMergeManager2(long targetSizeBytes, int minCountToMerge, boolean mergeEnabled) {
       super(
-              targetSizeBytes, minCountToMerge, mergeEnabled, MergingSnapshotProducer.this::workerPool);
+          targetSizeBytes, minCountToMerge, mergeEnabled, MergingSnapshotProducer.this::workerPool);
     }
 
     @Override
@@ -1316,7 +1319,6 @@ abstract class MergingSnapshotProducer<ThisT> extends SnapshotProducer<ThisT> {
       return MergingSnapshotProducer.this.newManifestReader(manifest);
     }
   }
-
 
   private class DeleteFileFilterManager extends ManifestFilterManager<DeleteFile> {
     private DeleteFileFilterManager() {
@@ -1405,7 +1407,7 @@ abstract class MergingSnapshotProducer<ThisT> extends SnapshotProducer<ThisT> {
   private class DeleteFileMergeManager2 extends ManifestMergeManager2<DeleteFile> {
     DeleteFileMergeManager2(long targetSizeBytes, int minCountToMerge, boolean mergeEnabled) {
       super(
-              targetSizeBytes, minCountToMerge, mergeEnabled, MergingSnapshotProducer.this::workerPool);
+          targetSizeBytes, minCountToMerge, mergeEnabled, MergingSnapshotProducer.this::workerPool);
     }
 
     @Override

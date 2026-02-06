@@ -39,180 +39,182 @@ import org.apache.iceberg.util.Exceptions;
 import org.apache.iceberg.util.Tasks;
 
 abstract class ManifestMergeManager2<F extends ContentFile<F>> {
-    private final long targetSizeBytes;
-    private final int minCountToMerge;
-    private final boolean mergeEnabled;
+  private final long targetSizeBytes;
+  private final int minCountToMerge;
+  private final boolean mergeEnabled;
 
-    // cache merge results to reuse when retrying
-    private final Map<List<ManifestFile>, ManifestFile> mergedManifests = Maps.newConcurrentMap();
+  // cache merge results to reuse when retrying
+  private final Map<List<ManifestFile>, ManifestFile> mergedManifests = Maps.newConcurrentMap();
 
-    private final Supplier<ExecutorService> workerPoolSupplier;
+  private final Supplier<ExecutorService> workerPoolSupplier;
 
-    ManifestMergeManager2(
-            long targetSizeBytes,
-            int minCountToMerge,
-            boolean mergeEnabled,
-            Supplier<ExecutorService> executorSupplier) {
-        this.targetSizeBytes = targetSizeBytes;
-        this.minCountToMerge = minCountToMerge;
-        this.mergeEnabled = mergeEnabled;
-        this.workerPoolSupplier = executorSupplier;
+  ManifestMergeManager2(
+      long targetSizeBytes,
+      int minCountToMerge,
+      boolean mergeEnabled,
+      Supplier<ExecutorService> executorSupplier) {
+    this.targetSizeBytes = targetSizeBytes;
+    this.minCountToMerge = minCountToMerge;
+    this.mergeEnabled = mergeEnabled;
+    this.workerPoolSupplier = executorSupplier;
+  }
+
+  protected abstract long snapshotId();
+
+  protected abstract PartitionSpec spec(int specId);
+
+  protected abstract void deleteFile(String location);
+
+  protected abstract ManifestWriter<F> newManifestWriter(PartitionSpec spec);
+
+  protected abstract ManifestReader<F> newManifestReader(ManifestFile manifest);
+
+  Iterable<ManifestFile> mergeManifests(Iterable<ManifestFile> manifests, List<File2> fileLogs) {
+    Iterator<ManifestFile> manifestIter = manifests.iterator();
+    if (!mergeEnabled || !manifestIter.hasNext()) {
+      return manifests;
     }
 
-    protected abstract long snapshotId();
+    ManifestFile first = manifestIter.next();
 
-    protected abstract PartitionSpec spec(int specId);
-
-    protected abstract void deleteFile(String location);
-
-    protected abstract ManifestWriter<F> newManifestWriter(PartitionSpec spec);
-
-    protected abstract ManifestReader<F> newManifestReader(ManifestFile manifest);
-
-    Iterable<ManifestFile> mergeManifests(Iterable<ManifestFile> manifests, List<File2> fileLogs) {
-        Iterator<ManifestFile> manifestIter = manifests.iterator();
-        if (!mergeEnabled || !manifestIter.hasNext()) {
-            return manifests;
-        }
-
-        ManifestFile first = manifestIter.next();
-
-        List<ManifestFile> merged = Lists.newArrayList();
-        ListMultimap<Integer, ManifestFile> groups = groupBySpec(first, manifestIter);
-        for (Integer specId : groups.keySet()) {
-            Iterables.addAll(merged, mergeGroup(first, specId, groups.get(specId), fileLogs));
-        }
-
-        return merged;
+    List<ManifestFile> merged = Lists.newArrayList();
+    ListMultimap<Integer, ManifestFile> groups = groupBySpec(first, manifestIter);
+    for (Integer specId : groups.keySet()) {
+      Iterables.addAll(merged, mergeGroup(first, specId, groups.get(specId), fileLogs));
     }
 
-    void cleanUncommitted(Set<ManifestFile> committed) {
-        // iterate over a copy of entries to avoid concurrent modification
-        List<Map.Entry<List<ManifestFile>, ManifestFile>> entries =
-                Lists.newArrayList(mergedManifests.entrySet());
+    return merged;
+  }
 
-        for (Map.Entry<List<ManifestFile>, ManifestFile> entry : entries) {
-            // delete any new merged manifests that aren't in the committed list
-            ManifestFile merged = entry.getValue();
-            if (!committed.contains(merged)) {
-                deleteFile(merged.path());
-                // remove the deleted file from the cache
-                mergedManifests.remove(entry.getKey());
+  void cleanUncommitted(Set<ManifestFile> committed) {
+    // iterate over a copy of entries to avoid concurrent modification
+    List<Map.Entry<List<ManifestFile>, ManifestFile>> entries =
+        Lists.newArrayList(mergedManifests.entrySet());
+
+    for (Map.Entry<List<ManifestFile>, ManifestFile> entry : entries) {
+      // delete any new merged manifests that aren't in the committed list
+      ManifestFile merged = entry.getValue();
+      if (!committed.contains(merged)) {
+        deleteFile(merged.path());
+        // remove the deleted file from the cache
+        mergedManifests.remove(entry.getKey());
+      }
+    }
+  }
+
+  private ListMultimap<Integer, ManifestFile> groupBySpec(
+      ManifestFile first, Iterator<ManifestFile> remaining) {
+    ListMultimap<Integer, ManifestFile> groups =
+        Multimaps.newListMultimap(
+            Maps.newTreeMap(Comparator.<Integer>reverseOrder()), Lists::newArrayList);
+    groups.put(first.partitionSpecId(), first);
+    remaining.forEachRemaining(manifest -> groups.put(manifest.partitionSpecId(), manifest));
+    return groups;
+  }
+
+  @SuppressWarnings("unchecked")
+  private Iterable<ManifestFile> mergeGroup(
+      ManifestFile first, int specId, List<ManifestFile> group, List<File2> fileLogs) {
+    // use a lookback of 1 to avoid reordering the manifests. using 1 also means this should pack
+    // from the end so that the manifest that gets under-filled is the first one, which will be
+    // merged the next time.
+    ListPacker<ManifestFile> packer = new ListPacker<>(targetSizeBytes, 1, false);
+    List<List<ManifestFile>> bins = packer.packEnd(group, ManifestFile::length);
+
+    // process bins in parallel, but put results in the order of the bins into an array to preserve
+    // the order of manifests and contents. preserving the order helps avoid random deletes when
+    // data files are eventually aged off.
+    List<ManifestFile>[] binResults =
+        (List<ManifestFile>[]) Array.newInstance(List.class, bins.size());
+    ManifestFile[] mergedFiles = new ManifestFile[bins.size()];
+
+    Tasks.range(bins.size())
+        .stopOnFailure()
+        .throwFailureWhenFinished()
+        .executeWith(workerPoolSupplier.get())
+        .run(
+            index -> {
+              List<ManifestFile> bin = bins.get(index);
+              List<ManifestFile> outputManifests = Lists.newArrayList();
+              binResults[index] = outputManifests;
+
+              if (bin.size() == 1) {
+                // no need to rewrite
+                outputManifests.add(bin.get(0));
+                return;
+              }
+
+              // if the bin has the first manifest (the new data files or an appended manifest file)
+              // then only merge it
+              // if the number of manifests is above the minimum count. this is applied only to bins
+              // with an in-memory
+              // manifest so that large manifests don't prevent merging older groups.
+              if (bin.contains(first) && bin.size() < minCountToMerge) {
+                // not enough to merge, add all manifest files to the output list
+                outputManifests.addAll(bin);
+              } else {
+                mergedFiles[index] = createManifest(specId, bin);
+                // merge the group
+                outputManifests.add(mergedFiles[index]);
+              }
+            });
+
+    for (int i = 0; i < bins.size(); i++) {
+      if (mergedFiles[i] != null) {
+        fileLogs.add(new File2(mergedFiles[i].path(), File2.File2Type.ADD, "manifest"));
+        bins.get(i)
+            .forEach(
+                manifest ->
+                    fileLogs.add(new File2(manifest.path(), File2.File2Type.DELETE, "manifest")));
+      }
+    }
+
+    return Iterables.concat(binResults);
+  }
+
+  private ManifestFile createManifest(int specId, List<ManifestFile> bin) {
+    // if this merge was already rewritten, use the existing file.
+    // if the new files are in this merge, then the ManifestFile for the new files has changed and
+    // will be a cache miss.
+    if (mergedManifests.containsKey(bin)) {
+      return mergedManifests.get(bin);
+    }
+
+    ManifestWriter<F> writer = newManifestWriter(spec(specId));
+    boolean threw = true;
+    try {
+      for (ManifestFile manifest : bin) {
+        try (ManifestReader<F> reader = newManifestReader(manifest)) {
+          for (ManifestEntry<F> entry : reader.entries()) {
+            if (entry.status() == Status.DELETED) {
+              // suppress deletes from previous snapshots. only files deleted by this snapshot
+              // should be added to the new manifest
+              if (entry.snapshotId() == snapshotId()) {
+                writer.delete(entry);
+              }
+            } else if (entry.status() == Status.ADDED && entry.snapshotId() == snapshotId()) {
+              // adds from this snapshot are still adds, otherwise they should be existing
+              writer.add(entry);
+            } else {
+              // add all files from the old manifest as existing files
+              writer.existing(entry);
             }
+          }
+        } catch (IOException e) {
+          throw new RuntimeIOException(e, "Failed to close manifest reader");
         }
+      }
+      threw = false;
+
+    } finally {
+      Exceptions.close(writer, threw);
     }
 
-    private ListMultimap<Integer, ManifestFile> groupBySpec(
-            ManifestFile first, Iterator<ManifestFile> remaining) {
-        ListMultimap<Integer, ManifestFile> groups =
-                Multimaps.newListMultimap(
-                        Maps.newTreeMap(Comparator.<Integer>reverseOrder()), Lists::newArrayList);
-        groups.put(first.partitionSpecId(), first);
-        remaining.forEachRemaining(manifest -> groups.put(manifest.partitionSpecId(), manifest));
-        return groups;
-    }
+    ManifestFile manifest = writer.toManifestFile();
 
-    @SuppressWarnings("unchecked")
-    private Iterable<ManifestFile> mergeGroup(
-            ManifestFile first, int specId, List<ManifestFile> group, List<File2> fileLogs) {
-        // use a lookback of 1 to avoid reordering the manifests. using 1 also means this should pack
-        // from the end so that the manifest that gets under-filled is the first one, which will be
-        // merged the next time.
-        ListPacker<ManifestFile> packer = new ListPacker<>(targetSizeBytes, 1, false);
-        List<List<ManifestFile>> bins = packer.packEnd(group, ManifestFile::length);
+    // update the cache
+    mergedManifests.put(bin, manifest);
 
-        // process bins in parallel, but put results in the order of the bins into an array to preserve
-        // the order of manifests and contents. preserving the order helps avoid random deletes when
-        // data files are eventually aged off.
-        List<ManifestFile>[] binResults =
-                (List<ManifestFile>[]) Array.newInstance(List.class, bins.size());
-        ManifestFile[] mergedFiles = new ManifestFile[bins.size()];
-
-        Tasks.range(bins.size())
-                .stopOnFailure()
-                .throwFailureWhenFinished()
-                .executeWith(workerPoolSupplier.get())
-                .run(
-                        index -> {
-                            List<ManifestFile> bin = bins.get(index);
-                            List<ManifestFile> outputManifests = Lists.newArrayList();
-                            binResults[index] = outputManifests;
-
-                            if (bin.size() == 1) {
-                                // no need to rewrite
-                                outputManifests.add(bin.get(0));
-                                return;
-                            }
-
-                            // if the bin has the first manifest (the new data files or an appended manifest file)
-                            // then only merge it
-                            // if the number of manifests is above the minimum count. this is applied only to bins
-                            // with an in-memory
-                            // manifest so that large manifests don't prevent merging older groups.
-                            if (bin.contains(first) && bin.size() < minCountToMerge) {
-                                // not enough to merge, add all manifest files to the output list
-                                outputManifests.addAll(bin);
-                            } else {
-                                mergedFiles[index] = createManifest(specId, bin);
-                                // merge the group
-                                outputManifests.add(mergedFiles[index]);
-                            }
-                        });
-
-        for (int i = 0; i < bins.size(); i++) {
-            if (mergedFiles[i]  != null) {
-                fileLogs.add(new File2(mergedFiles[i].path(), File2.File2Type.ADD, "manifest"));
-                bins.get(i).forEach( manifest ->
-                        fileLogs.add(new File2(manifest.path(), File2.File2Type.DELETE, "manifest")));
-            }
-        }
-
-        return Iterables.concat(binResults);
-    }
-
-    private ManifestFile createManifest(int specId, List<ManifestFile> bin) {
-        // if this merge was already rewritten, use the existing file.
-        // if the new files are in this merge, then the ManifestFile for the new files has changed and
-        // will be a cache miss.
-        if (mergedManifests.containsKey(bin)) {
-            return mergedManifests.get(bin);
-        }
-
-        ManifestWriter<F> writer = newManifestWriter(spec(specId));
-        boolean threw = true;
-        try {
-            for (ManifestFile manifest : bin) {
-                try (ManifestReader<F> reader = newManifestReader(manifest)) {
-                    for (ManifestEntry<F> entry : reader.entries()) {
-                        if (entry.status() == Status.DELETED) {
-                            // suppress deletes from previous snapshots. only files deleted by this snapshot
-                            // should be added to the new manifest
-                            if (entry.snapshotId() == snapshotId()) {
-                                writer.delete(entry);
-                            }
-                        } else if (entry.status() == Status.ADDED && entry.snapshotId() == snapshotId()) {
-                            // adds from this snapshot are still adds, otherwise they should be existing
-                            writer.add(entry);
-                        } else {
-                            // add all files from the old manifest as existing files
-                            writer.existing(entry);
-                        }
-                    }
-                } catch (IOException e) {
-                    throw new RuntimeIOException(e, "Failed to close manifest reader");
-                }
-            }
-            threw = false;
-
-        } finally {
-            Exceptions.close(writer, threw);
-        }
-
-        ManifestFile manifest = writer.toManifestFile();
-
-        // update the cache
-        mergedManifests.put(bin, manifest);
-
-        return manifest;
-    }
+    return manifest;
+  }
 }

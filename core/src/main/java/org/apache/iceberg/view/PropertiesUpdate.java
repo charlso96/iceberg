@@ -81,19 +81,19 @@ class PropertiesUpdate implements UpdateViewProperties {
   @Override
   public void commit2(List<File2> fileLogs) {
     Tasks.foreach(ops)
-            .retry(
-                    PropertyUtil.propertyAsInt(
-                            base.properties(), COMMIT_NUM_RETRIES, COMMIT_NUM_RETRIES_DEFAULT))
-            .exponentialBackoff(
-                    PropertyUtil.propertyAsInt(
-                            base.properties(), COMMIT_MIN_RETRY_WAIT_MS, COMMIT_MIN_RETRY_WAIT_MS_DEFAULT),
-                    PropertyUtil.propertyAsInt(
-                            base.properties(), COMMIT_MAX_RETRY_WAIT_MS, COMMIT_MAX_RETRY_WAIT_MS_DEFAULT),
-                    PropertyUtil.propertyAsInt(
-                            base.properties(), COMMIT_TOTAL_RETRY_TIME_MS, COMMIT_TOTAL_RETRY_TIME_MS_DEFAULT),
-                    2.0 /* exponential */)
-            .onlyRetryOn(CommitFailedException.class)
-            .run(taskOps -> taskOps.commit(base, internalApply()));
+        .retry(
+            PropertyUtil.propertyAsInt(
+                base.properties(), COMMIT_NUM_RETRIES, COMMIT_NUM_RETRIES_DEFAULT))
+        .exponentialBackoff(
+            PropertyUtil.propertyAsInt(
+                base.properties(), COMMIT_MIN_RETRY_WAIT_MS, COMMIT_MIN_RETRY_WAIT_MS_DEFAULT),
+            PropertyUtil.propertyAsInt(
+                base.properties(), COMMIT_MAX_RETRY_WAIT_MS, COMMIT_MAX_RETRY_WAIT_MS_DEFAULT),
+            PropertyUtil.propertyAsInt(
+                base.properties(), COMMIT_TOTAL_RETRY_TIME_MS, COMMIT_TOTAL_RETRY_TIME_MS_DEFAULT),
+            2.0 /* exponential */)
+        .onlyRetryOn(CommitFailedException.class)
+        .run(taskOps -> taskOps.commit(base, internalApply()));
   }
 
   @Override

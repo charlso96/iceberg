@@ -186,15 +186,15 @@ public class HadoopTableOperations implements TableOperations {
     }
 
     Preconditions.checkArgument(
-            base == null || base.location().equals(metadata.location()),
-            "Hadoop path-based tables cannot be relocated");
+        base == null || base.location().equals(metadata.location()),
+        "Hadoop path-based tables cannot be relocated");
     Preconditions.checkArgument(
-            !metadata.properties().containsKey(TableProperties.WRITE_METADATA_LOCATION),
-            "Hadoop path-based tables cannot relocate metadata");
+        !metadata.properties().containsKey(TableProperties.WRITE_METADATA_LOCATION),
+        "Hadoop path-based tables cannot relocate metadata");
 
     String codecName =
-            metadata.property(
-                    TableProperties.METADATA_COMPRESSION, TableProperties.METADATA_COMPRESSION_DEFAULT);
+        metadata.property(
+            TableProperties.METADATA_COMPRESSION, TableProperties.METADATA_COMPRESSION_DEFAULT);
     TableMetadataParser.Codec codec = TableMetadataParser.Codec.fromName(codecName);
     String fileExtension = TableMetadataParser.getFileExtension(codec);
     Path tempMetadataFile = metadataPath(UUID.randomUUID() + fileExtension);

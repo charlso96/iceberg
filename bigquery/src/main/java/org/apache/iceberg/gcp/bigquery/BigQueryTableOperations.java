@@ -129,11 +129,11 @@ final class BigQueryTableOperations extends BaseMetastoreTableOperations {
   @Override
   public void doCommit2(TableMetadata base, TableMetadata metadata, List<File2> fileLogs) {
     String newMetadataLocation =
-            base == null && metadata.metadataFileLocation() != null
-                    ? metadata.metadataFileLocation()
-                    : writeNewMetadata(metadata, currentVersion() + 1);
+        base == null && metadata.metadataFileLocation() != null
+            ? metadata.metadataFileLocation()
+            : writeNewMetadata(metadata, currentVersion() + 1);
     BaseMetastoreOperations.CommitStatus commitStatus =
-            BaseMetastoreOperations.CommitStatus.FAILURE;
+        BaseMetastoreOperations.CommitStatus.FAILURE;
     try {
       if (base == null) {
         createTable(newMetadataLocation, metadata);
@@ -150,8 +150,8 @@ final class BigQueryTableOperations extends BaseMetastoreTableOperations {
         throw e;
       }
       commitStatus =
-              BaseMetastoreOperations.CommitStatus.valueOf(
-                      checkCommitStatus(newMetadataLocation, metadata).name());
+          BaseMetastoreOperations.CommitStatus.valueOf(
+              checkCommitStatus(newMetadataLocation, metadata).name());
       if (commitStatus == BaseMetastoreOperations.CommitStatus.FAILURE) {
         throw new CommitFailedException(e, "Failed to commit");
       }
@@ -166,10 +166,10 @@ final class BigQueryTableOperations extends BaseMetastoreTableOperations {
         }
       } catch (RuntimeException e) {
         LOG.error(
-                "Failed to cleanup metadata file at {} for table {}",
-                newMetadataLocation,
-                tableName(),
-                e);
+            "Failed to cleanup metadata file at {} for table {}",
+            newMetadataLocation,
+            tableName(),
+            e);
       }
     }
   }

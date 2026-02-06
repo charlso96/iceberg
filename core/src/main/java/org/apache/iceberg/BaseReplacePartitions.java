@@ -135,7 +135,7 @@ public class BaseReplacePartitions extends MergingSnapshotProducer<ReplacePartit
       return super.apply2(base, snapshot, fileLogs);
     } catch (ManifestFilterManager.DeleteException e) {
       throw new ValidationException(
-              "Cannot commit file that conflicts with existing partition: %s", e.partition());
+          "Cannot commit file that conflicts with existing partition: %s", e.partition());
     }
   }
 }

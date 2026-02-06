@@ -186,5 +186,6 @@ public interface Transaction {
    * @throws CommitFailedException If the updates cannot be committed due to conflicts.
    */
   void commitTransaction();
+
   void commitTransaction2();
 }

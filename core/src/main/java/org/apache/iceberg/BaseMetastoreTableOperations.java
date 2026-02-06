@@ -158,9 +158,9 @@ public abstract class BaseMetastoreTableOperations extends BaseMetastoreOperatio
     requestRefresh();
 
     LOG.info(
-            "Successfully committed to table {} in {} ms",
-            tableName(),
-            System.currentTimeMillis() - start);
+        "Successfully committed to table {} in {} ms",
+        tableName(),
+        System.currentTimeMillis() - start);
   }
 
   protected void doCommit(TableMetadata base, TableMetadata metadata) {
