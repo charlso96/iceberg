@@ -221,7 +221,7 @@ class RESTTableOperations implements TableOperations {
 
     updateCurrentMetadata(response);
 
-    fileLogs.add(new File2(current().metadataFileLocation(), File2.File2Type.ADD, "metadata");
+    fileLogs.add(new File2(current().metadataFileLocation(), File2.File2Type.ADD, "metadata"));
   }
 
   @Override
