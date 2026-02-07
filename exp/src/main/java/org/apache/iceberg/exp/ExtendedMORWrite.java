@@ -31,7 +31,6 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.Instant;
 import java.time.LocalTime;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -60,13 +59,19 @@ import org.apache.iceberg.catalog.TableIdentifier;
 import org.apache.iceberg.hive.ExpCatalogExtension;
 import org.apache.iceberg.hive.HiveCatalog;
 import org.apache.iceberg.relocated.com.google.common.collect.ImmutableMap;
+import org.apache.iceberg.relocated.com.google.common.collect.Lists;
 import org.apache.iceberg.relocated.com.google.common.collect.Maps;
 import org.apache.iceberg.types.Types;
 import org.duckdb.DuckDBConnection;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
 
 public class ExtendedMORWrite {
+  // 1. Add this private constructor
+  private ExtendedMORWrite() {}
+
   public static class TimePair {
     private final Instant start;
     private final Instant end;
@@ -83,17 +88,18 @@ public class ExtendedMORWrite {
     // Getters, equals(), hashCode(), and toString() would go here
   }
 
-  private static final ObjectMapper json_mapper = new ObjectMapper();
-  private static ExpCatalogExtension HIVE_METASTORE_EXTENSION;
-  private static String DB_NAME;
-  private static String TABLE_NAME;
-  private static int NUM_ROWS_PER_FILE;
+  private static final Logger LOG = LoggerFactory.getLogger(ExtendedMORWrite.class);
+  private static final ObjectMapper JSON_MAPPER = new ObjectMapper();
+  private static ExpCatalogExtension hiveMetastoreExtension;
+  private static String dbName;
+  private static String tableName;
+  private static int numRowsPerFile;
   //  private static int TXN_PER_COMPACTION;
-  private static String WAREHOUSE_LOCATION;
-  public static String S3_SECRET;
-  public static String S3_KEY_ID;
-  public static String S3_REGION;
-  private static S3Client S3;
+  private static String warehouseLocation;
+  private static String s3Secret;
+  private static String s3KeyId;
+  private static String s3Region;
+  private static S3Client s3;
   static final Schema SCHEMA =
       new Schema(
           Types.StructType.of(
@@ -122,21 +128,21 @@ public class ExtendedMORWrite {
 
   // hive catalog
   private static HiveCatalog catalog;
-  private static DuckDBConnection duck_db_conn;
+  private static DuckDBConnection duckDbConn;
 
   // data structures for measurements
-  private static final List<TimePair> LOAD_TABLE_TIMES = new ArrayList<>();
-  private static final List<TimePair> INSERT_FILE_TIMES = new ArrayList<>();
-  private static final List<TimePair> COMMIT_TIMES = new ArrayList<>();
-  //  private static final List<TimePair> COMPACT_TIMES = new ArrayList<>();
-  private static final List<List<File2>> ADDED_FILES = new ArrayList<>();
+  private static final List<TimePair> LOAD_TABLE_TIMES = Lists.newArrayList();
+  private static final List<TimePair> INSERT_FILE_TIMES = Lists.newArrayList();
+  private static final List<TimePair> COMMIT_TIMES = Lists.newArrayList();
+  //  private static final List<TimePair> COMPACT_TIMES = Lists.newArrayList();
+  private static final List<List<File2>> ADDED_FILES = Lists.newArrayList();
 
   public static Map<String, String> parseJsonToMap(String jsonFilePath) throws IOException {
     File file = new File(jsonFilePath);
 
     // TypeReference is essential to tell Jackson the specific
     // Map implementation and generic types to use.
-    return json_mapper.readValue(file, new TypeReference<Map<String, String>>() {});
+    return JSON_MAPPER.readValue(file, new TypeReference<Map<String, String>>() {});
   }
 
   public static void initCatalog() {
@@ -145,56 +151,56 @@ public class ExtendedMORWrite {
     conf.put(
         CatalogProperties.CLIENT_POOL_CACHE_EVICTION_INTERVAL_MS,
         String.valueOf(TimeUnit.SECONDS.toMillis(10)));
-    conf.put(CatalogProperties.WAREHOUSE_LOCATION, WAREHOUSE_LOCATION);
+    conf.put(CatalogProperties.WAREHOUSE_LOCATION, warehouseLocation);
     conf.put(CatalogProperties.FILE_IO_IMPL, S3FileIO.class.getName());
-    conf.put(S3FileIOProperties.ACCESS_KEY_ID, S3_KEY_ID);
-    conf.put(S3FileIOProperties.SECRET_ACCESS_KEY, S3_SECRET);
-    conf.put(AwsClientProperties.CLIENT_REGION, S3_REGION);
+    conf.put(S3FileIOProperties.ACCESS_KEY_ID, s3KeyId);
+    conf.put(S3FileIOProperties.SECRET_ACCESS_KEY, s3Secret);
+    conf.put(AwsClientProperties.CLIENT_REGION, s3Region);
     //        conf.put(S3FileIOProperties.SESSION_TOKEN, StaticClientFactory.class.getName());
     // for accessing s3 later on
     AwsClientFactories.defaultFactory().initialize(conf);
-    S3 = AwsClientFactories.defaultFactory().s3();
+    s3 = AwsClientFactories.defaultFactory().s3();
     catalog =
         (HiveCatalog)
             CatalogUtil.loadCatalog(
                 HiveCatalog.class.getName(),
                 CatalogUtil.ICEBERG_CATALOG_TYPE_HIVE,
                 conf,
-                HIVE_METASTORE_EXTENSION.hiveConf());
+                hiveMetastoreExtension.hiveConf());
   }
 
   public static void main(String[] args) throws Exception {
     // read the config file for experimentation
     Map<String, String> expConfigs = parseJsonToMap(args[0]);
-    DB_NAME = expConfigs.get("db_name");
-    TABLE_NAME = expConfigs.get("table_name");
-    NUM_ROWS_PER_FILE = Integer.parseInt(expConfigs.get("num_rows_per_file"));
-    WAREHOUSE_LOCATION = expConfigs.get("warehouse_location");
+    dbName = expConfigs.get("db_name");
+    tableName = expConfigs.get("table_name");
+    numRowsPerFile = Integer.parseInt(expConfigs.get("num_rows_per_file"));
+    warehouseLocation = expConfigs.get("warehouse_location");
     //    TXN_PER_COMPACTION = Integer.parseInt(expConfigs.get("txn_per_compaction"));
-    S3_SECRET = expConfigs.get("s3_secret");
-    S3_KEY_ID = expConfigs.get("s3_key_id");
-    S3_REGION = expConfigs.get("s3_region");
+    s3Secret = expConfigs.get("s3_secret");
+    s3KeyId = expConfigs.get("s3_key_id");
+    s3Region = expConfigs.get("s3_region");
 
-    HIVE_METASTORE_EXTENSION = ExpCatalogExtension.builder().withDatabase(DB_NAME).build();
-    HIVE_METASTORE_EXTENSION.beforeAll();
+    hiveMetastoreExtension = ExpCatalogExtension.builder().withDatabase(dbName).build();
+    hiveMetastoreExtension.beforeAll();
     initCatalog();
 
     PartitionSpec spec = PartitionSpec.builderFor(SCHEMA).build();
-    TableIdentifier tableIdent = TableIdentifier.of(DB_NAME, TABLE_NAME);
-    String location = Path.of(WAREHOUSE_LOCATION).resolve(DB_NAME).resolve(TABLE_NAME).toString();
+    TableIdentifier tableIdent = TableIdentifier.of(dbName, tableName);
+    String location = Path.of(warehouseLocation).resolve(dbName).resolve(tableName).toString();
 
     catalog.createTable(tableIdent, SCHEMA, spec, location, ImmutableMap.of());
-    duck_db_conn = (DuckDBConnection) DriverManager.getConnection("jdbc:duckdb:");
-    try (Statement stmt = duck_db_conn.createStatement()) {
+    duckDbConn = (DuckDBConnection) DriverManager.getConnection("jdbc:duckdb:");
+    try (Statement stmt = duckDbConn.createStatement()) {
       stmt.execute("INSTALL httpfs; LOAD httpfs;");
       stmt.execute("INSTALL parquet; LOAD parquet;");
       String secretSql =
           String.format(
               Locale.getDefault(),
               "CREATE SECRET IF NOT EXISTS s3_secret (TYPE S3, KEY_ID '%s', SECRET '%s', REGION '%s');",
-              S3_KEY_ID,
-              S3_SECRET,
-              S3_REGION);
+              s3KeyId,
+              s3Secret,
+              s3Region);
       stmt.execute(secretSql);
     }
 
@@ -204,7 +210,7 @@ public class ExtendedMORWrite {
       runVanillaExp(expConfigs);
     }
 
-    HIVE_METASTORE_EXTENSION.afterAll();
+    hiveMetastoreExtension.afterAll();
   }
 
   private static String schemaToTargetList(Schema schema) {
@@ -237,13 +243,12 @@ public class ExtendedMORWrite {
     //
     List<Types.NestedField> columns = schema.columns();
     for (Types.NestedField column : columns) {
-      valueCounts.put(column.fieldId(), (long) NUM_ROWS_PER_FILE);
+      valueCounts.put(column.fieldId(), (long) numRowsPerFile);
       nullValueCounts.put(column.fieldId(), 0L);
       nanValueCounts.put(column.fieldId(), 0L);
     }
 
-    return new Metrics(
-        (long) NUM_ROWS_PER_FILE, null, valueCounts, nullValueCounts, nanValueCounts);
+    return new Metrics((long) numRowsPerFile, null, valueCounts, nullValueCounts, nanValueCounts);
   }
 
   //  private static void runRavenExp(Map<String, String> expConfigs) {}
@@ -256,10 +261,10 @@ public class ExtendedMORWrite {
     // TODO figure out how to output the result as files
     //    String expLocation = expConfigs.get("exp_location");
     //    String logFileName = String.format("morwrite-iceberg-vanilla-%d-log.json",
-    // NUM_ROWS_PER_FILE);
+    // numRowsPerFile);
     //    String summaryFileName =
-    //        String.format("morwrite-iceberg-vanilla-%d-summary.json", NUM_ROWS_PER_FILE);
-    System.out.println("Length of list: " + ADDED_FILES.size());
+    //        String.format("morwrite-iceberg-vanilla-%d-summary.json", numRowsPerFile);
+    LOG.info("Length of list: {}", ADDED_FILES.size());
   }
 
   private static void runVanillaExpImpl() {
@@ -268,16 +273,16 @@ public class ExtendedMORWrite {
 
     // Keep running until interrupted
     while (!Thread.currentThread().isInterrupted()) {
-      try (Statement stmt = duck_db_conn.createStatement()) {
-        List<File2> fileLogs = new ArrayList<>();
+      try (Statement stmt = duckDbConn.createStatement()) {
+        List<File2> fileLogs = Lists.newArrayList();
 
-        Instant before_load_table = Instant.now();
+        Instant beforeLoadTable = Instant.now();
 
         // load table & start transaction
-        Table table = catalog.loadTable(TableIdentifier.of(DB_NAME, TABLE_NAME));
+        Table table = catalog.loadTable(TableIdentifier.of(dbName, tableName));
         AppendFiles txn = table.newFastAppend();
 
-        Instant after_load_table = Instant.now();
+        Instant afterLoadTable = Instant.now();
 
         // generate data
         stmt.execute(
@@ -285,49 +290,47 @@ public class ExtendedMORWrite {
                 Locale.getDefault(),
                 "CREATE TEMP TABLE staging_data AS SELECT %s FROM generate_series(1, %d) AS t(x);",
                 targetList,
-                NUM_ROWS_PER_FILE));
+                numRowsPerFile));
 
         // construct file statistics
         Metrics metrics = computeMetrics(SCHEMA);
 
         // write the data to S3 as a parquet file
-        String file_path =
+        String filePath =
             Path.of(table.location()).resolve(UUID.randomUUID().toString()).toString();
         stmt.execute(
             String.format(
-                Locale.getDefault(), "COPY staging_data TO '%s' (FORMAT PARQUET);", file_path));
+                Locale.getDefault(), "COPY staging_data TO '%s' (FORMAT PARQUET);", filePath));
         stmt.execute("DROP TABLE staging_data;");
 
-        long file_size = getFileSize(file_path);
+        long fileSize = getFileSize(filePath);
 
-        Instant after_insert_file = Instant.now();
+        Instant afterInsertFile = Instant.now();
 
         DataFile newFile =
             DataFiles.builder(spec)
-                .withFileSizeInBytes(file_size)
+                .withFileSizeInBytes(fileSize)
                 .withFormat(FileFormat.PARQUET)
                 .withMetrics(metrics)
-                .withPath(file_path)
+                .withPath(filePath)
                 .build();
 
         txn.appendFile(newFile);
         txn.commit2(fileLogs);
 
-        Instant after_commit = Instant.now();
+        Instant afterCommit = Instant.now();
 
-        LOAD_TABLE_TIMES.add(new TimePair(before_load_table, after_load_table));
-        INSERT_FILE_TIMES.add(new TimePair(after_load_table, after_insert_file));
-        COMMIT_TIMES.add(new TimePair(after_insert_file, after_commit));
+        LOAD_TABLE_TIMES.add(new TimePair(beforeLoadTable, afterLoadTable));
+        INSERT_FILE_TIMES.add(new TimePair(afterLoadTable, afterInsertFile));
+        COMMIT_TIMES.add(new TimePair(afterInsertFile, afterCommit));
         ADDED_FILES.add(fileLogs);
       } catch (SQLException e) {
-        System.out.println(e.getMessage());
+        LOG.info("Database error occurred", e);
       }
     }
   }
 
   public static void runTaskForDuration(Runnable task, long duration, TimeUnit unit) {
-    System.out.println("starting execution for " + duration + " " + unit);
-
     ExecutorService executor = Executors.newSingleThreadExecutor();
     ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
 
@@ -339,7 +342,6 @@ public class ExtendedMORWrite {
     Future<?> future2 =
         scheduler.schedule(
             () -> {
-              System.out.println("\nTime is up! Sending interrupt...");
               future.cancel(true); // 'true' allows interrupting the thread
               executor.shutdownNow();
               scheduler.shutdown();
@@ -360,7 +362,7 @@ public class ExtendedMORWrite {
     String bucket = uri.getHost();
     String key = uri.getPath().substring(1);
     HeadObjectRequest headRequest = HeadObjectRequest.builder().bucket(bucket).key(key).build();
-    return S3.headObject(headRequest).contentLength();
+    return s3.headObject(headRequest).contentLength();
   }
 
   //    public class DuckDBFastGenerate {
