@@ -215,7 +215,7 @@ abstract class ManifestFilterManager2<F extends ContentFile<F>> {
     boolean trustManifestReferences = canTrustManifestReferences(manifests);
     ManifestFile[] filtered = new ManifestFile[manifests.size()];
     // keeps track of old manifests that are replaced
-    ManifestFile[] old_manifests = new ManifestFile[manifests.size()];
+    ManifestFile[] oldManifests = new ManifestFile[manifests.size()];
 
     // open all of the manifest files in parallel, use index to avoid reordering
     Tasks.range(filtered.length)
@@ -229,7 +229,7 @@ abstract class ManifestFilterManager2<F extends ContentFile<F>> {
                   filterManifest(
                       tableSchema, manifests.get(index), trustManifestReferences, replaced);
               if (replaced[0]) {
-                old_manifests[index] = filtered[index];
+                oldManifests[index] = filtered[index];
               }
               filtered[index] = manifest;
             });
@@ -237,8 +237,8 @@ abstract class ManifestFilterManager2<F extends ContentFile<F>> {
     validateRequiredDeletes(filtered);
 
     for (int i = 0; i < manifests.size(); i++) {
-      if (old_manifests[i] != null) {
-        fileLogs.add(new File2(old_manifests[i].path(), File2.File2Type.DELETE, "manifest"));
+      if (oldManifests[i] != null) {
+        fileLogs.add(new File2(oldManifests[i].path(), File2.File2Type.DELETE, "manifest"));
         fileLogs.add(new File2(filtered[i].path(), File2.File2Type.ADD, "manifest"));
       }
     }

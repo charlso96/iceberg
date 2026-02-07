@@ -18,22 +18,22 @@
  */
 package org.apache.iceberg.hive;
 
-import static java.nio.file.attribute.PosixFilePermissions.fromString;
-
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.Reader;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hive.conf.HiveConf;
@@ -56,8 +56,8 @@ import org.apache.thrift.transport.TTransportFactory;
 
 public class ExpCatalog {
 
-  private static String DEFAULT_DATABASE_NAME = "default";
-  private static int DEFAULT_POOL_SIZE = 5;
+  //  private static String DEFAULT_DATABASE_NAME = "default";
+  private static int defaultPoolSize = 5;
 
   // create the metastore handlers based on whether we're working with Hive2 or Hive3 dependencies
   // we need to do this because there is a breaking API change between Hive2 and Hive3
@@ -94,38 +94,25 @@ public class ExpCatalog {
   // It's tricky to clear all static fields in an HMS instance in order to switch derby root dir.
   // Therefore, we reuse the same derby root between tests and remove it after JVM exits.
   private static final File HIVE_LOCAL_DIR;
-  private static String DERBY_PATH;
+  private static String debyPath;
 
   static {
     try {
-      java.nio.file.Path hive_local_dir_path = Paths.get("/tmp/hive");
-      HIVE_LOCAL_DIR = hive_local_dir_path.toFile();
+      java.nio.file.Path hiveLocalDirPath = Paths.get("/tmp/hive");
+      HIVE_LOCAL_DIR = hiveLocalDirPath.toFile();
       //                    createTempDirectory("hive",
       // asFileAttribute(fromString("rwxrwxrwx"))).toFile();
-      if (!Files.exists(hive_local_dir_path)) {
+      if (!Files.exists(hiveLocalDirPath)) {
         // Note: createDirectories creates missing parent paths as well.
         // We set permissions on the final directory.
-        Files.createDirectories(hive_local_dir_path);
+        Files.createDirectories(hiveLocalDirPath);
       }
-      Files.setPosixFilePermissions(hive_local_dir_path, fromString("rwxrwxrwx"));
+      Files.setPosixFilePermissions(hiveLocalDirPath, PosixFilePermissions.fromString("rwxrwxrwx"));
 
-      DERBY_PATH = new File(HIVE_LOCAL_DIR, "metastore_db").getPath();
+      debyPath = new File(HIVE_LOCAL_DIR, "metastore_db").getPath();
       File derbyLogFile = new File(HIVE_LOCAL_DIR, "derby.log");
       System.setProperty("derby.stream.error.file", derbyLogFile.getAbsolutePath());
-      setupMetastoreDB("jdbc:derby:" + DERBY_PATH + ";create=true");
-      Runtime.getRuntime()
-          .addShutdownHook(
-              new Thread(
-                  () -> {
-                    Path localDirPath = new Path(HIVE_LOCAL_DIR.getAbsolutePath());
-                    FileSystem fs = Util.getFs(localDirPath, new Configuration());
-                    String errMsg = "Failed to delete " + localDirPath;
-                    try {
-                      fs.delete(localDirPath, true);
-                    } catch (IOException e) {
-                      throw new RuntimeException(errMsg, e);
-                    }
-                  }));
+      setupMetastoreDB("jdbc:derby:" + debyPath + ";create=true");
     } catch (Exception e) {
       throw new RuntimeException("Failed to setup local dir for hive metastore", e);
     }
@@ -141,7 +128,7 @@ public class ExpCatalog {
    * Starts a TestHiveMetastore with the default connection pool size (5) and the default HiveConf.
    */
   public void start() {
-    start(new HiveConf(new Configuration(), ExpCatalog.class), DEFAULT_POOL_SIZE);
+    start(new HiveConf(new Configuration(), ExpCatalog.class), defaultPoolSize);
   }
 
   /**
@@ -151,7 +138,7 @@ public class ExpCatalog {
    * @param conf The hive configuration to use
    */
   public void start(HiveConf conf) {
-    start(conf, DEFAULT_POOL_SIZE);
+    start(conf, defaultPoolSize);
   }
 
   /**
@@ -180,7 +167,7 @@ public class ExpCatalog {
       this.hiveConf = conf;
       this.server = newThriftServer(socket, poolSize, hiveConf);
       this.executorService = Executors.newSingleThreadExecutor();
-      this.executorService.submit(() -> server.serve());
+      Future<?> unUsed = this.executorService.submit(() -> server.serve());
 
       // in Hive3, setting this as a system prop ensures that it will be picked up whenever a new
       // HiveConf is created
@@ -195,7 +182,7 @@ public class ExpCatalog {
   }
 
   public void stop() throws Exception {
-    reset();
+    // reset();
     if (clientPool != null) {
       clientPool.close();
     }
@@ -209,6 +196,14 @@ public class ExpCatalog {
       baseHandler.shutdown();
     }
     METASTORE_THREADS_SHUTDOWN.invoke();
+    Path localDirPath = new Path(HIVE_LOCAL_DIR.getAbsolutePath());
+    FileSystem fs = Util.getFs(localDirPath, new Configuration());
+    String errMsg = "Failed to delete " + localDirPath;
+    try {
+      fs.delete(localDirPath, true);
+    } catch (IOException e) {
+      throw new RuntimeException(errMsg, e);
+    }
   }
 
   public HiveConf hiveConf() {
@@ -220,37 +215,37 @@ public class ExpCatalog {
     return dbDir.getPath();
   }
 
-  public void reset() throws Exception {
-    if (clientPool != null) {
-      for (String dbName : clientPool.run(client -> client.getAllDatabases())) {
-        for (String tblName : clientPool.run(client -> client.getAllTables(dbName))) {
-          clientPool.run(
-              client -> {
-                client.dropTable(dbName, tblName, true, true, true);
-                return null;
-              });
-        }
-
-        if (!DEFAULT_DATABASE_NAME.equals(dbName)) {
-          // Drop cascade, functions dropped by cascade
-          clientPool.run(
-              client -> {
-                client.dropDatabase(dbName, true, true, true);
-                return null;
-              });
-        }
-      }
-    }
-
-    Path warehouseRoot = new Path(HIVE_LOCAL_DIR.getAbsolutePath());
-    FileSystem fs = Util.getFs(warehouseRoot, hiveConf);
-    for (FileStatus fileStatus : fs.listStatus(warehouseRoot)) {
-      if (!fileStatus.getPath().getName().equals("derby.log")
-          && !fileStatus.getPath().getName().equals("metastore_db")) {
-        fs.delete(fileStatus.getPath(), true);
-      }
-    }
-  }
+  //  public void reset() throws Exception {
+  //    if (clientPool != null) {
+  //      for (String dbName : clientPool.run(client -> client.getAllDatabases())) {
+  //        for (String tblName : clientPool.run(client -> client.getAllTables(dbName))) {
+  //          clientPool.run(
+  //              client -> {
+  //                client.dropTable(dbName, tblName, true, true, true);
+  //                return null;
+  //              });
+  //        }
+  //
+  //        if (!DEFAULT_DATABASE_NAME.equals(dbName)) {
+  //          // Drop cascade, functions dropped by cascade
+  //          clientPool.run(
+  //              client -> {
+  //                client.dropDatabase(dbName, true, true, true);
+  //                return null;
+  //              });
+  //        }
+  //      }
+  //    }
+  //
+  //    Path warehouseRoot = new Path(HIVE_LOCAL_DIR.getAbsolutePath());
+  //    FileSystem fs = Util.getFs(warehouseRoot, hiveConf);
+  //    for (FileStatus fileStatus : fs.listStatus(warehouseRoot)) {
+  //      if (!fileStatus.getPath().getName().equals("derby.log")
+  //          && !fileStatus.getPath().getName().equals("metastore_db")) {
+  //        fs.delete(fileStatus.getPath(), true);
+  //      }
+  //    }
+  //  }
 
   public Table getTable(String dbName, String tableName) throws TException, InterruptedException {
     return clientPool.run(client -> client.getTable(dbName, tableName));
@@ -265,7 +260,7 @@ public class ExpCatalog {
     HiveConf serverConf = new HiveConf(conf);
     serverConf.set(
         HiveConf.ConfVars.METASTORECONNECTURLKEY.varname,
-        "jdbc:derby:" + DERBY_PATH + ";create=true");
+        "jdbc:derby:" + debyPath + ";create=true");
     baseHandler = HMS_HANDLER_CTOR.newInstance("new db based metaserver", serverConf);
     IHMSHandler handler = GET_BASE_HMS_HANDLER.invoke(serverConf, baseHandler, false);
 
@@ -300,7 +295,8 @@ public class ExpCatalog {
               ExpCatalog.class.getClassLoader().getResourceAsStream("hive-schema-3.1.0.derby.sql");
           Reader reader =
               new InputStreamReader(
-                  Preconditions.checkNotNull(inputStream, "Invalid input stream: null"))) {
+                  Preconditions.checkNotNull(inputStream, "Invalid input stream: null"),
+                  StandardCharsets.UTF_8)) {
         scriptRunner.runScript(reader);
       }
     }

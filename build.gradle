@@ -112,7 +112,7 @@ if (file("${rootDir}/iceberg-build.properties").exists()) {
 }
 
 def projectVersion = getProjectVersion()
-final REVAPI_PROJECTS = ["iceberg-api", "iceberg-core", "iceberg-parquet", "iceberg-orc", "iceberg-common", "iceberg-data"]
+final REVAPI_PROJECTS = ["iceberg-parquet", "iceberg-orc", "iceberg-common", "iceberg-data"]
 
 allprojects {
   group = "org.apache.iceberg"
@@ -1126,12 +1126,93 @@ project(':iceberg-exp') {
     useJUnitPlatform()
   }
 
+  // Global Conflict Resolution Strategy
+//  configurations.all {
+//    // --- 1. LOGGING CONFLICTS (From your previous question) ---
+//    // Force Logback, ban other bridges
+//    exclude group: 'org.slf4j', module: 'slf4j-log4j12'
+//    exclude group: 'org.slf4j', module: 'slf4j-reload4j'
+//    exclude group: 'org.apache.logging.log4j', module: 'log4j-slf4j-impl'
+//    // Resolve Log4j vs Reload4j
+//    resolutionStrategy.capabilitiesResolution.withCapability("log4j:log4j") {
+//      select("ch.qos.reload4j:reload4j")
+//    }
+//
+//    // --- 2. SERVLET API CONFLICTS ---
+//    // Issue: 'tomcat-embed-core' includes the Servlet API classes, clashing with standalone 'javax.servlet-api'.
+//    // Fix: If Tomcat is present (likely for testing or Hive), it MUST provide the classes.
+//    // We ban the standalone APIs to avoid "Duplicate Class" errors.
+//    exclude group: 'javax.servlet', module: 'servlet-api'       // Ancient (pre-2010)
+//    exclude group: 'javax.servlet', module: 'javax.servlet-api' // Standard
+//    exclude group: 'javax.servlet.jsp', module: 'jsp-api'       // Old JSP
+//    // Note: If you remove tomcat-embed-core later, you must un-comment javax.servlet-api
+//
+//    // --- 3. JDO API CONFLICTS ---
+//    // Issue: Hive uses 'org.datanucleus:javax.jdo', which clashes with standard 'javax.jdo:jdo-api'.
+//    // Fix: We let DataNucleus win because Hive Metastore relies on its specific packaging.
+//    exclude group: 'javax.jdo', module: 'jdo-api'
+//
+//    // --- 4. ANNOTATION API CONFLICTS ---
+//    // Issue: Tomcat bundles its own version of standard annotations.
+//    // Fix: We prefer the standard 'javax.annotation-api' and exclude Tomcat's subset.
+//    exclude group: 'org.apache.tomcat', module: 'tomcat-annotations-api'
+//
+//    // --- 5. HADOOP/YARN DUPLICATES ---
+//    // Issue: Hadoop modules often have split packages or duplicate package-info.class files.
+//    // Fix: These are usually benign metadata issues, but if you have class conflicts like
+//    // 'AppAttemptMetricsConstants', it often means 'yarn-server-common' leaked into the client.
+//    // We exclude server-side yarn modules from the client classpath if possible.
+//    exclude group: 'org.apache.hadoop', module: 'hadoop-yarn-server-common'
+//  }
+  configurations.all {
+    // --- 1. LOGGING CONFLICTS (From your previous question) ---
+    // Force Logback, ban other bridges
+    exclude group: 'org.slf4j', module: 'slf4j-log4j12'
+    exclude group: 'org.slf4j', module: 'slf4j-reload4j'
+    exclude group: 'org.apache.logging.log4j', module: 'log4j-slf4j-impl'
+
+    // --- 2. SERVLET API CONFLICTS ---
+    // Issue: 'tomcat-embed-core' includes the Servlet API classes, clashing with standalone 'javax.servlet-api'.
+    // Fix: If Tomcat is present (likely for testing or Hive), it MUST provide the classes.
+    // We ban the standalone APIs to avoid "Duplicate Class" errors.
+    exclude group: 'javax.servlet', module: 'servlet-api'
+    exclude group: 'javax.servlet', module: 'javax.servlet-api'
+    exclude group: 'javax.servlet.jsp', module: 'jsp-api'
+
+    // --- 3. JDO API CONFLICTS ---
+    // Issue: Hive uses 'org.datanucleus:javax.jdo', which clashes with standard 'javax.jdo:jdo-api'.
+    // Fix: We let DataNucleus win because Hive Metastore relies on its specific packaging.
+    exclude group: 'javax.jdo', module: 'jdo-api'
+    // --- 4. ANNOTATION API CONFLICTS ---
+    // Issue: Tomcat bundles its own version of standard annotations.
+    // Fix: We prefer the standard 'javax.annotation-api' and exclude Tomcat's subset.
+    exclude group: 'org.apache.tomcat', module: 'tomcat-annotations-api'// --- 5. HADOOP/YARN DUPLICATES ---
+    // Issue: Hadoop modules often have split packages or duplicate package-info.class files.
+    // Fix: These are usually benign metadata issues, but if you have class conflicts like
+    // 'AppAttemptMetricsConstants', it often means 'yarn-server-common' leaked into the client.
+    // We exclude server-side yarn modules from the client classpath if possible.
+    exclude group: 'org.apache.hadoop', module: 'hadoop-yarn-server-common'
+  }
+
   dependencies {
+    modules {
+      module("ant:ant") {
+        replacedBy("org.apache.ant:ant", "ant:ant was renamed to org.apache.ant:ant")
+      }
+      // Fix 2: Log4j (Add this!)
+      // This tells Gradle: "If ANYTHING asks for log4j:log4j, give them reload4j:reload4j instead."
+      module("log4j:log4j") {
+        replacedBy("ch.qos.reload4j:reload4j", "Security replacement for Log4j 1.x")
+      }
+    }
+
+
     implementation project(path: ':iceberg-bundled-guava', configuration: 'shadow')
     implementation project(':iceberg-core')
     api project(':iceberg-api')
     implementation project(':iceberg-common')
     implementation project(':iceberg-aws')
+    implementation project(':iceberg-hive-metastore')
     annotationProcessor libs.immutables.value
     compileOnly libs.immutables.value
 

@@ -79,7 +79,7 @@ public class BaseTransaction implements Transaction {
   private TableMetadata current;
   private boolean hasLastOpCommitted;
   private final MetricsReporter reporter;
-  private final List<File2> fileLogs;
+  private final List<File2> txnFileLogs;
 
   BaseTransaction(
       String tableName, TableOperations ops, TransactionType type, TableMetadata start) {
@@ -102,7 +102,7 @@ public class BaseTransaction implements Transaction {
     this.type = type;
     this.hasLastOpCommitted = true;
     this.reporter = reporter;
-    this.fileLogs = Lists.newArrayList();
+    this.txnFileLogs = Lists.newArrayList();
   }
 
   @Override
@@ -128,7 +128,7 @@ public class BaseTransaction implements Transaction {
 
   @Override
   public List<File2> fileLogs() {
-    return fileLogs;
+    return txnFileLogs;
   }
 
   protected final <T extends PendingUpdate> T appendUpdate(T update) {
@@ -474,7 +474,7 @@ public class BaseTransaction implements Transaction {
                 // still write the metadata file & its location since there is no easy way to
                 // reconstruct
                 // snapshot from a single manifest list file yet.
-                underlyingOps.commit2(base, current, fileLogs);
+                underlyingOps.commit2(base, current, txnFileLogs);
               });
 
     } catch (CommitStateUnknownException e) {
@@ -586,7 +586,7 @@ public class BaseTransaction implements Transaction {
       for (PendingUpdate update : updates) {
         // re-commit each update in the chain to apply it and update current
         try {
-          update.commit2(fileLogs);
+          update.commit2(txnFileLogs);
         } catch (CommitFailedException e) {
           // Cannot pass even with retry due to conflicting metadata changes. So, break the
           // retry-loop.

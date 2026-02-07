@@ -38,8 +38,8 @@ public class ScriptRunner {
   private final boolean stopOnError;
   private final boolean autoCommit;
 
-  private PrintWriter logWriter = new PrintWriter(System.out);
-  private PrintWriter errorLogWriter = new PrintWriter(System.err);
+  private PrintWriter logWriter = null;
+  private PrintWriter errorLogWriter = null;
 
   private String delimiter = DEFAULT_DELIMITER;
   private boolean fullLineDelimiter = false;
@@ -195,7 +195,7 @@ public class ScriptRunner {
 
   private void print(Object obj) {
     if (logWriter != null) {
-      System.out.print(obj);
+      logWriter.println(obj);
     }
   }
 
