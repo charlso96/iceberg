@@ -52,6 +52,7 @@ flink120 = { strictly = "1.20.1"}
 flink20 = { strictly = "2.0.0"}
 google-libraries-bom = "26.66.0"
 guava = "33.4.8-jre"
+grpc = "1.62.2"
 hadoop3 = "3.4.1"
 httpcomponents-httpclient5 = "5.5"
 hive2 = { strictly = "2.3.10"} # see rich version usage explanation above
@@ -79,6 +80,10 @@ netty-buffer = "4.2.4.Final"
 object-client-bundle = "3.3.2"
 orc = "1.9.7"
 parquet = "1.16.0"
+# The Java Library is 3.26.1
+# The Compiler Artifact "3.26.1" delivers the "v26.1" executable
+protobuf = "3.25.1"
+protobufPlugin = "0.9.4"
 roaringbitmap = "1.3.0"
 scala-collection-compat = "2.13.0"
 slf4j = "2.0.17"
@@ -89,6 +94,8 @@ spark40 = "4.0.0"
 sqlite-jdbc = "3.50.3.0"
 testcontainers = "1.21.3"
 tez08 = { strictly = "0.8.4"}  # see rich version usage explanation above
+tomcatAnnotations = "6.0.53"
+
 
 [libraries]
 activation = { module = "javax.activation:activation", version.ref = "activation" }
@@ -135,6 +142,9 @@ flink20-streaming-java = { module = "org.apache.flink:flink-streaming-java", ver
 flink20-table-api-java-bridge = { module = "org.apache.flink:flink-table-api-java-bridge", version.ref = "flink20" }
 google-libraries-bom = { module = "com.google.cloud:libraries-bom", version.ref = "google-libraries-bom" }
 guava-guava = { module = "com.google.guava:guava", version.ref = "guava" }
+grpc-netty = { module = "io.grpc:grpc-netty-shaded", version.ref = "grpc" }
+grpc-protobuf = { module = "io.grpc:grpc-protobuf", version.ref = "grpc" }
+grpc-stub = { module = "io.grpc:grpc-stub", version.ref = "grpc" }
 hadoop3-client = { module = "org.apache.hadoop:hadoop-client", version.ref = "hadoop3" }
 hadoop3-common = { module = "org.apache.hadoop:hadoop-common", version.ref = "hadoop3" }
 hadoop3-hdfs = { module = "org.apache.hadoop:hadoop-hdfs", version.ref = "hadoop3" }
@@ -169,11 +179,14 @@ orc-core = { module = "org.apache.orc:orc-core", version.ref = "orc" }
 parquet-avro = { module = "org.apache.parquet:parquet-avro", version.ref = "parquet" }
 parquet-column = { module = "org.apache.parquet:parquet-column", version.ref = "parquet" }
 parquet-hadoop = { module = "org.apache.parquet:parquet-hadoop", version.ref = "parquet" }
+protobuf-java = { module = "com.google.protobuf:protobuf-java", version.ref = "protobuf" }
+protobuf-protoc = { module = "com.google.protobuf:protoc", version.ref = "protobuf" }
 roaringbitmap = { module = "org.roaringbitmap:RoaringBitmap", version.ref = "roaringbitmap" }
 scala-collection-compat = { module = "org.scala-lang.modules:scala-collection-compat_2.13", version.ref = "scala-collection-compat"}
 slf4j-api = { module = "org.slf4j:slf4j-api", version.ref = "slf4j" }
 slf4j-simple = { module = "org.slf4j:slf4j-simple", version.ref = "slf4j" }
 snowflake-jdbc = { module = "net.snowflake:snowflake-jdbc", version.ref = "snowflake-jdbc" }
+tomcat-annotations = { module = "org.apache.tomcat:annotations-api", version.ref = "tomcatAnnotations" }
 
 # test libraries
 apiguardian = { module = "org.apiguardian:apiguardian-api", version.ref = "apiguardian" }
@@ -224,3 +237,6 @@ testcontainers-junit-jupiter = { module = "org.testcontainers:junit-jupiter", ve
 testcontainers-minio = { module = "org.testcontainers:minio", version.ref = "testcontainers" }
 tez08-dag = { module = "org.apache.tez:tez-dag", version.ref = "tez08" }
 tez08-mapreduce = { module = "org.apache.tez:tez-mapreduce", version.ref = "tez08" }
+
+[plugins]
+protobuf = { id = "com.google.protobuf", version.ref = "protobufPlugin" }

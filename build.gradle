@@ -23,6 +23,7 @@ import java.util.regex.Pattern
 import com.github.jengelman.gradle.plugins.shadow.transformers.AppendingTransformer
 import com.github.jengelman.gradle.plugins.shadow.transformers.XmlAppendingTransformer
 
+
 buildscript {
   repositories {
     gradlePluginPortal()
@@ -40,6 +41,12 @@ buildscript {
     classpath 'com.palantir.gradle.gitversion:gradle-git-version:3.4.0'
     classpath 'org.openapitools:openapi-generator-gradle-plugin:7.14.0'
   }
+}
+
+plugins {
+  id 'java'
+  // 1. Load the plugin and version on the classpath, but DO NOT apply it to the root
+  alias(libs.plugins.protobuf) apply false
 }
 
 String scalaVersion = System.getProperty("scalaVersion") != null ? System.getProperty("scalaVersion") : System.getProperty("defaultScalaVersion")
@@ -1128,12 +1135,16 @@ project(':iceberg-exp') {
     useJUnitPlatform()
   }
 
+  apply plugin: 'java'
+  apply plugin: 'com.google.protobuf'
   apply plugin: 'application'
 
   application {
     // 1. Point to your main class
     mainClass = 'org.apache.iceberg.exp.ExtendedMORWrite'
   }
+
+
 
   // 1. Add these plugins at the top of the project block
 //  apply plugin: 'com.gradleup.shadow' // Or 'com.gradleup.shadow' if using newer Gradle
@@ -1240,6 +1251,13 @@ project(':iceberg-exp') {
       }
     }
 
+    implementation libs.protobuf.java
+
+    // 2. gRPC (Optional)
+    implementation libs.grpc.netty
+    implementation libs.grpc.protobuf
+    implementation libs.grpc.stub
+//  compileOnly libs.tomcat.annotations
 
     implementation project(path: ':iceberg-bundled-guava', configuration: 'shadow')
     implementation project(':iceberg-core')
@@ -1308,7 +1326,7 @@ project(':iceberg-exp') {
       exclude group: 'org.apache.avro', module: 'avro'
       exclude group: 'org.slf4j', module: 'slf4j-log4j12'
     }
-    
+
     implementation 'org.datanucleus:datanucleus-core:4.1.17'
     implementation 'org.datanucleus:datanucleus-api-jdo:4.2.4'
     implementation 'org.datanucleus:datanucleus-rdbms:4.1.19'
@@ -1317,6 +1335,25 @@ project(':iceberg-exp') {
     testImplementation project(path: ':iceberg-api', configuration: 'testArtifacts')
     testImplementation project(path: ':iceberg-core', configuration: 'testArtifacts')
     testImplementation libs.awaitility
+  }
+
+  protobuf {
+    protoc {
+      // Use the version from the catalog
+      artifact = libs.protobuf.protoc.get()
+    }
+
+    plugins {
+      grpc {
+        artifact = "io.grpc:protoc-gen-grpc-java:${libs.versions.grpc.get()}"
+      }
+    }
+
+    generateProtoTasks {
+      all()*.plugins {
+        grpc {}
+      }
+    }
   }
 }
 
