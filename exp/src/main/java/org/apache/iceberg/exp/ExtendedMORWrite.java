@@ -25,7 +25,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.File;
 import java.io.IOException;
 import java.net.URI;
-import java.nio.file.Path;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.sql.Statement;
@@ -40,6 +39,9 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import org.apache.hadoop.hive.conf.HiveConf;
+import org.apache.hadoop.hive.metastore.HiveMetaStoreClient;
+import org.apache.hadoop.hive.metastore.api.Database;
 import org.apache.iceberg.AppendFiles;
 import org.apache.iceberg.CatalogProperties;
 import org.apache.iceberg.CatalogUtil;
@@ -55,8 +57,8 @@ import org.apache.iceberg.aws.AwsClientFactories;
 import org.apache.iceberg.aws.AwsClientProperties;
 import org.apache.iceberg.aws.s3.S3FileIO;
 import org.apache.iceberg.aws.s3.S3FileIOProperties;
+import org.apache.iceberg.catalog.Namespace;
 import org.apache.iceberg.catalog.TableIdentifier;
-import org.apache.iceberg.hive.ExpCatalogExtension;
 import org.apache.iceberg.hive.HiveCatalog;
 import org.apache.iceberg.relocated.com.google.common.collect.ImmutableMap;
 import org.apache.iceberg.relocated.com.google.common.collect.Lists;
@@ -90,7 +92,7 @@ public class ExtendedMORWrite {
 
   private static final Logger LOG = LoggerFactory.getLogger(ExtendedMORWrite.class);
   private static final ObjectMapper JSON_MAPPER = new ObjectMapper();
-  private static ExpCatalogExtension hiveMetastoreExtension;
+//  private static ExpCatalogExtension hiveMetastoreExtension;
   private static String dbName;
   private static String tableName;
   private static int numRowsPerFile;
@@ -123,7 +125,7 @@ public class ExtendedMORWrite {
                   required(18, "ss_coupon_amt", Types.DecimalType.of(11, 2)),
                   required(19, "ss_net_paid", Types.DecimalType.of(11, 2)),
                   required(20, "ss_net_paid_inc_tax", Types.DecimalType.of(11, 2)),
-                  required(20, "ss_net_profit", Types.DecimalType.of(11, 2)))
+                  required(21, "ss_net_profit", Types.DecimalType.of(11, 2)))
               .fields());
 
   // hive catalog
@@ -145,7 +147,26 @@ public class ExtendedMORWrite {
     return JSON_MAPPER.readValue(file, new TypeReference<Map<String, String>>() {});
   }
 
-  public static void initCatalog() {
+  public static void initCatalog() throws Exception {
+//    Map<String, String> hive_conf = Maps.newHashMap();
+//    hive_conf.put("fs.s3.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem");
+//    hive_conf.put("fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem");
+//    hive_conf.put("hive.metastore.warehouse.dir", warehouseLocation);
+//    hive_conf.put("fs.s3a.access.key", s3KeyId);
+//    hive_conf.put("fs.s3a.secret.key", s3Secret);
+//    hive_conf.put("fs.s3a.endpoint.region", s3Region);
+
+    // load the hive config
+    HiveConf hiveConf = new HiveConf();
+    // create new database
+//    HiveMetaStoreClient metastoreClient = new HiveMetaStoreClient(hiveConf);
+//    String dbPath = String.format("%s/%s.db", warehouseLocation, dbName);
+//    Database db = new Database(dbName, "description", dbPath, Maps.newHashMap());
+//    metastoreClient.createDatabase(db);
+//    metastoreClient.close();
+
+//    hiveMetastoreExtension = ExpCatalogExtension.builder().withWarehouse(warehouseLocation).withDatabase(dbName).withConfig(hive_conf).build();
+//    hiveMetastoreExtension.beforeAll();
     Map<String, String> conf = Maps.newHashMap();
     conf.put(CatalogProperties.URI, "thrift://localhost:9083");
     conf.put(
@@ -165,11 +186,11 @@ public class ExtendedMORWrite {
             CatalogUtil.loadCatalog(
                 HiveCatalog.class.getName(),
                 CatalogUtil.ICEBERG_CATALOG_TYPE_HIVE,
-                conf,
-                hiveMetastoreExtension.hiveConf());
+                conf, hiveConf);
   }
 
   public static void main(String[] args) throws Exception {
+    // System.setProperty("datanucleus.plugin.pluginRegistryBundleCheck", "LOG");
     // read the config file for experimentation
     Map<String, String> expConfigs = parseJsonToMap(args[0]);
     dbName = expConfigs.get("db_name");
@@ -181,14 +202,12 @@ public class ExtendedMORWrite {
     s3KeyId = expConfigs.get("s3_key_id");
     s3Region = expConfigs.get("s3_region");
 
-    hiveMetastoreExtension = ExpCatalogExtension.builder().withDatabase(dbName).build();
-    hiveMetastoreExtension.beforeAll();
     initCatalog();
 
     PartitionSpec spec = PartitionSpec.builderFor(SCHEMA).build();
     TableIdentifier tableIdent = TableIdentifier.of(dbName, tableName);
-    String location = Path.of(warehouseLocation).resolve(dbName).resolve(tableName).toString();
-
+    String location = String.format("%s/%s.db/%s", warehouseLocation, dbName, tableName);
+    catalog.createNamespace(Namespace.of(dbName));
     catalog.createTable(tableIdent, SCHEMA, spec, location, ImmutableMap.of());
     duckDbConn = (DuckDBConnection) DriverManager.getConnection("jdbc:duckdb:");
     try (Statement stmt = duckDbConn.createStatement()) {
@@ -210,7 +229,7 @@ public class ExtendedMORWrite {
       runVanillaExp(expConfigs);
     }
 
-    hiveMetastoreExtension.afterAll();
+//    hiveMetastoreExtension.afterAll();
   }
 
   private static String schemaToTargetList(Schema schema) {
@@ -296,8 +315,7 @@ public class ExtendedMORWrite {
         Metrics metrics = computeMetrics(SCHEMA);
 
         // write the data to S3 as a parquet file
-        String filePath =
-            Path.of(table.location()).resolve(UUID.randomUUID().toString()).toString();
+        String filePath = String.format("%s/%s", table.location(), UUID.randomUUID());
         stmt.execute(
             String.format(
                 Locale.getDefault(), "COPY staging_data TO '%s' (FORMAT PARQUET);", filePath));

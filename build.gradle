@@ -20,6 +20,8 @@
 import groovy.transform.Memoized
 import java.util.regex.Matcher
 import java.util.regex.Pattern
+import com.github.jengelman.gradle.plugins.shadow.transformers.AppendingTransformer
+import com.github.jengelman.gradle.plugins.shadow.transformers.XmlAppendingTransformer
 
 buildscript {
   repositories {
@@ -1126,6 +1128,38 @@ project(':iceberg-exp') {
     useJUnitPlatform()
   }
 
+  apply plugin: 'application'
+
+  application {
+    // 1. Point to your main class
+    mainClass = 'org.apache.iceberg.exp.ExtendedMORWrite'
+  }
+
+  // 1. Add these plugins at the top of the project block
+//  apply plugin: 'com.gradleup.shadow' // Or 'com.gradleup.shadow' if using newer Gradle
+//
+//  // 3. Configure Shadow (Optional but recommended)
+//  shadowJar {
+//    zip64 true // Required if your dependencies exceed 4GB (common with Hadoop/Spark)
+//    mergeServiceFiles() // Crucial for Hadoop/AWS SPI to work!
+//    transform(XmlAppendingTransformer) {
+//      resource = 'plugin.xml'
+//    }
+//    transform(XmlAppendingTransformer) {
+//      resource = 'META-INF/plugin.xml' // Just in case some versions use this path
+//    }
+//
+//    transform(AppendingTransformer) {
+//      resource = 'META-INF/spring.handlers'
+//    }
+//    transform(AppendingTransformer) {
+//      resource = 'META-INF/spring.schemas'
+//    }
+//    // ----------------------
+//
+//    archiveClassifier.set('all')
+//  }
+
   // Global Conflict Resolution Strategy
 //  configurations.all {
 //    // --- 1. LOGGING CONFLICTS (From your previous question) ---
@@ -1221,6 +1255,7 @@ project(':iceberg-exp') {
     implementation platform(libs.jackson.bom)
     implementation libs.jackson.core
     implementation libs.jackson.databind
+    implementation libs.slf4j.simple
 
     implementation(platform(libs.awssdk.bom))
     implementation(libs.awssdk.s3accessgrants)
@@ -1273,6 +1308,11 @@ project(':iceberg-exp') {
       exclude group: 'org.apache.avro', module: 'avro'
       exclude group: 'org.slf4j', module: 'slf4j-log4j12'
     }
+    
+    implementation 'org.datanucleus:datanucleus-core:4.1.17'
+    implementation 'org.datanucleus:datanucleus-api-jdo:4.2.4'
+    implementation 'org.datanucleus:datanucleus-rdbms:4.1.19'
+    implementation 'org.datanucleus:javax.jdo:3.2.0-m3'
 
     testImplementation project(path: ':iceberg-api', configuration: 'testArtifacts')
     testImplementation project(path: ':iceberg-core', configuration: 'testArtifacts')

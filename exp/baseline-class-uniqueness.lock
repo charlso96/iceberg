@@ -1,0 +1,14 @@
+# Danger! Multiple jars contain identically named classes. This may cause different behaviour depending on classpath ordering.
+# Run ./gradlew checkClassUniqueness --fix to update this file
+
+## runtimeClasspath
+[org.apache.hadoop:hadoop-auth, org.apache.hadoop:hadoop-common]
+  - org.apache.hadoop.security.authentication.server.package-info
+[org.apache.hadoop:hadoop-yarn-api, org.apache.hadoop:hadoop-yarn-common]
+  - org.apache.hadoop.yarn.api.resource.package-info
+  - org.apache.hadoop.yarn.factories.package-info
+  - org.apache.hadoop.yarn.factory.providers.package-info
+  - org.apache.hadoop.yarn.util.package-info
+[org.apache.hadoop:hadoop-yarn-client, org.apache.hadoop:hadoop-yarn-common]
+  - org.apache.hadoop.yarn.client.api.impl.package-info
+  - org.apache.hadoop.yarn.client.api.package-info
