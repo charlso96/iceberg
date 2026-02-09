@@ -1,5 +1,8 @@
 syntax = "proto3";
 
+// This determines the Java package for the generated files
+option java_package = "org.apache.iceberg.raven";
+
 message FileObject {
   string path = 1;
   optional string format = 2;

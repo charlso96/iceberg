@@ -18,8 +18,25 @@
  *  * under the License.
  *
  */
-
 package org.apache.iceberg.exp;
 
-public class RavenCatalog {
+import java.util.Map;
+import org.apache.iceberg.raven.RavenCatalog;
+import org.apache.iceberg.raven.CatalogOuterClass.*;
+import org.apache.iceberg.relocated.com.google.common.collect.Maps;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+public class TestRavenCatalog {
+    private static final Logger LOG = LoggerFactory.getLogger(TestRavenCatalog.class);
+
+    private TestRavenCatalog() {}
+
+    public static void main(String[] args) throws Exception {
+        Map<String, String> configs = Maps.newHashMap();
+        configs.put("raven.address", "localhost:9876");
+        RavenCatalog ravenCatalog = new RavenCatalog(configs);
+        TableObject table = ravenCatalog.loadTable("workspace1", "db1", "table1");
+        LOG.info("Table name: {}", table.getTableName());
+    }
 }
