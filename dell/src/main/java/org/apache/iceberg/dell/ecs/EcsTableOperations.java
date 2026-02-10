@@ -131,7 +131,9 @@ public class EcsTableOperations extends BaseMetastoreTableOperations {
             "Replace failed, E-Tag %s mismatch for table %s", cachedETag, tableName());
       }
     }
-
+    if (base != null) {
+      fileLogs.add(new File2(base.metadataFileLocation(), File2.File2Type.DELETE, "metadata"));
+    }
     fileLogs.add(new File2(newMetadataLocation, File2.File2Type.ADD, "metadata"));
   }
 

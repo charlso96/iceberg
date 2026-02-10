@@ -170,6 +170,9 @@ class JdbcTableOperations extends BaseMetastoreTableOperations {
         LOG.debug("Committing new table: {}", tableName());
         createTable(newMetadataLocation);
       }
+      if (base != null) {
+        fileLogs.add(new File2(base.metadataFileLocation(), File2.File2Type.DELETE, "metadata"));
+      }
       fileLogs.add(new File2(newMetadataLocation, File2.File2Type.ADD, "metadata"));
     } catch (SQLIntegrityConstraintViolationException e) {
 

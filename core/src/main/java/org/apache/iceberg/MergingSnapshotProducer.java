@@ -40,6 +40,8 @@ import org.apache.iceberg.io.CloseableIterator;
 import org.apache.iceberg.io.InputFile;
 import org.apache.iceberg.relocated.com.google.common.base.Preconditions;
 import org.apache.iceberg.relocated.com.google.common.base.Predicate;
+import org.apache.iceberg.relocated.com.google.common.base.Predicates;
+import org.apache.iceberg.relocated.com.google.common.collect.FluentIterable;
 import org.apache.iceberg.relocated.com.google.common.collect.ImmutableList;
 import org.apache.iceberg.relocated.com.google.common.collect.ImmutableSet;
 import org.apache.iceberg.relocated.com.google.common.collect.Iterables;
@@ -995,7 +997,7 @@ abstract class MergingSnapshotProducer<ThisT> extends SnapshotProducer<ThisT> {
 
   @Override
   public List<ManifestFile> apply2(TableMetadata base, Snapshot snapshot, List<File2> fileLogs) {
-    // filter any existing manifests
+    // filter out any existing manifests with delete entries and replace with new files
     List<ManifestFile> filtered =
         filterManager2.filterManifests(
             SnapshotUtil.schemaFor(base, targetBranch()),
@@ -1024,6 +1026,7 @@ abstract class MergingSnapshotProducer<ThisT> extends SnapshotProducer<ThisT> {
             fileLogs);
 
     // only keep manifests that have live data files or that were written by this commit
+    // filtering out emepty manifests
     Predicate<ManifestFile> shouldKeep =
         manifest ->
             manifest.hasAddedFiles()
@@ -1033,6 +1036,20 @@ abstract class MergingSnapshotProducer<ThisT> extends SnapshotProducer<ThisT> {
         Iterables.filter(Iterables.concat(prepareNewDataManifests(), filtered), shouldKeep);
     Iterable<ManifestFile> unmergedDeleteManifests =
         Iterables.filter(Iterables.concat(prepareDeleteManifests(), filteredDeletes), shouldKeep);
+    // compute files that might have been filtered out by shouldKeep predicate
+    List<ManifestFile> filteredUnmergedManifests = FluentIterable.from(filtered)
+            .filter(Predicates.not(Predicates.in(Sets.newHashSet(unmergedManifests))))
+            .toList();
+    List<ManifestFile> filteredUnmergedDeleteManifests = FluentIterable.from(filteredDeletes)
+            .filter(Predicates.not(Predicates.in(Sets.newHashSet(unmergedDeleteManifests))))
+            .toList();
+    // should be empty, but just in case....
+    for (ManifestFile file : filteredUnmergedManifests) {
+      fileLogs.add(new File2(file.path(),  File2.File2Type.DELETE, "manifest"));
+    }
+    for (ManifestFile file : filteredUnmergedDeleteManifests) {
+      fileLogs.add(new File2(file.path(),  File2.File2Type.DELETE, "manifest"));
+    }
 
     // update the snapshot summary
     summaryBuilder.clear();

@@ -630,7 +630,7 @@ abstract class SnapshotProducer<ThisT> implements SnapshotUpdate<ThisT> {
                   // this operation retries
                   // to ensure that if a concurrent operation assigns the UUID, this operation will
                   // not fail.
-                  taskOps.commit(base, updated.withUUID());
+                  taskOps.commit2(base, updated.withUUID(), fileLogs);
                 });
 
       } catch (CommitStateUnknownException commitStateUnknownException) {

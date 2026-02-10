@@ -660,7 +660,9 @@ public class BaseTransaction implements Transaction {
       this.tempOps = ops.temp(metadata);
 
       BaseTransaction.this.hasLastOpCommitted = true;
-
+      if (underlyingBase != null) {
+        fileLogs.add(new File2(underlyingBase.metadataFileLocation(), File2.File2Type.DELETE, "metadata"));
+      }
       fileLogs.add(new File2(metadata.metadataFileLocation(), File2.File2Type.ADD, "metadata"));
     }
 

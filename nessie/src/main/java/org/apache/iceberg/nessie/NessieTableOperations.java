@@ -149,6 +149,9 @@ public class NessieTableOperations extends BaseMetastoreTableOperations {
     try {
       String contentId = table == null ? null : table.getId();
       client.commitTable(base, metadata, newMetadataLocation, contentId, key);
+      if (base != null) {
+        fileLogs.add(new File2(base.metadataFileLocation(), File2.File2Type.DELETE, "metadata"));
+      }
       fileLogs.add(new File2(newMetadataLocation, File2.File2Type.ADD, "metadata"));
     } catch (NessieConflictException | NessieNotFoundException | HttpClientException ex) {
       if (ex instanceof NessieConflictException || ex instanceof NessieNotFoundException) {

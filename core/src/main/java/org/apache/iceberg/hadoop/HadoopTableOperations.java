@@ -213,6 +213,9 @@ public class HadoopTableOperations implements TableOperations {
     writeVersionHint(nextVersion);
 
     CatalogUtil.deleteRemovedMetadataFiles(io(), base, metadata);
+    if (base != null) {
+      fileLogs.add(new File2(base.metadataFileLocation(), File2.File2Type.DELETE, "metadata"));
+    }
     fileLogs.add(new File2(finalMetadataFile.toString(), File2.File2Type.ADD, "metadata"));
     this.shouldRefresh = true;
   }

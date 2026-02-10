@@ -474,9 +474,12 @@ public class InMemoryCatalog extends BaseMetastoreViewCatalog
                 }
 
                 throw new CommitFailedException(
-                    "Cannot commit to table %s metadata location from %s to %s "
-                        + "because it has been concurrently modified to %s",
-                    tableIdentifier, oldLocation, newLocation, existingLocation);
+                        "Cannot commit to table %s metadata location from %s to %s "
+                                + "because it has been concurrently modified to %s",
+                        tableIdentifier, oldLocation, newLocation, existingLocation);
+              }
+              if (base != null) {
+                fileLogs.add(new File2(base.metadataFileLocation(), File2.File2Type.DELETE, "metadata"));
               }
               fileLogs.add(new File2(newLocation, File2.File2Type.ADD, "metadata"));
               return newLocation;

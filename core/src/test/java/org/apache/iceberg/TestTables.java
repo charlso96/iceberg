@@ -372,6 +372,9 @@ public class TestTables {
                   .build();
           VERSIONS.put(tableName, version == null ? 0 : version + 1);
           METADATA.put(tableName, current);
+          if (base != null) {
+            fileLogs.add(new File2(base.metadataFileLocation(), File2.File2Type.DELETE, "metadata"));
+          }
           fileLogs.add(new File2(current.metadataFileLocation(), File2.File2Type.ADD, "metadata"));
         } else {
           throw new CommitFailedException(

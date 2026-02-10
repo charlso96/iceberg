@@ -437,6 +437,9 @@ public class HiveTableOperations extends BaseMetastoreTableOperations
 
         switch (commitStatus) {
           case SUCCESS:
+            if (base != null) {
+              fileLogs.add(new File2(base.metadataFileLocation(), File2.File2Type.DELETE, "metadata"));
+            }
             fileLogs.add(new File2(newMetadataLocation, File2.File2Type.ADD, "metadata"));
             break;
           case FAILURE:

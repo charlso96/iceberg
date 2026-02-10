@@ -178,6 +178,9 @@ class TestTables {
           }
           METADATA.put(tableName, metadata);
           this.current = metadata;
+          if (base != null) {
+            fileLogs.add(new File2(base.metadataFileLocation(), File2.File2Type.DELETE, "metadata"));
+          }
           fileLogs.add(new File2(metadata.metadataFileLocation(), File2.File2Type.ADD, "metadata"));
         } else {
           throw new CommitFailedException(

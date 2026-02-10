@@ -140,6 +140,9 @@ final class BigQueryTableOperations extends BaseMetastoreTableOperations {
       } else {
         updateTable(base.metadataFileLocation(), newMetadataLocation, metadata);
       }
+      if (base != null) {
+        fileLogs.add(new File2(base.metadataFileLocation(), File2.File2Type.DELETE, "metadata"));
+      }
       fileLogs.add(new File2(newMetadataLocation, File2.File2Type.ADD, "metadata"));
       commitStatus = BaseMetastoreOperations.CommitStatus.SUCCESS;
     } catch (CommitFailedException | CommitStateUnknownException e) {
