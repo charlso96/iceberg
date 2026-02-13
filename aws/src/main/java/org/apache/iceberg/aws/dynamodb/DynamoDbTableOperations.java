@@ -182,6 +182,10 @@ class DynamoDbTableOperations extends BaseMetastoreTableOperations {
       Map<String, String> properties = prepareProperties(table, newMetadataLocation);
       persistTable(tableKey, table, properties, retryDetector);
       commitStatus = CommitStatus.SUCCESS;
+      if (base != null) {
+        fileLogs.add(new File2(base.metadataFileLocation(), File2.File2Type.DELETE, "metadata"));
+      }
+      fileLogs.add(new File2(newMetadataLocation, File2.File2Type.ADD, "metadata"));
     } catch (CommitFailedException e) {
       // any explicit commit failures are passed up and out to the retry handler
       throw e;

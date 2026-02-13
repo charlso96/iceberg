@@ -437,10 +437,7 @@ public class HiveTableOperations extends BaseMetastoreTableOperations
 
         switch (commitStatus) {
           case SUCCESS:
-            if (base != null) {
-              fileLogs.add(new File2(base.metadataFileLocation(), File2.File2Type.DELETE, "metadata"));
-            }
-            fileLogs.add(new File2(newMetadataLocation, File2.File2Type.ADD, "metadata"));
+
             break;
           case FAILURE:
             throw e;
@@ -463,6 +460,10 @@ public class HiveTableOperations extends BaseMetastoreTableOperations
       HiveOperationsBase.cleanupMetadataAndUnlock(io(), commitStatus, newMetadataLocation, lock);
     }
 
+    if (base != null) {
+      fileLogs.add(new File2(base.metadataFileLocation(), File2.File2Type.DELETE, "metadata"));
+    }
+    fileLogs.add(new File2(newMetadataLocation, File2.File2Type.ADD, "metadata"));
     LOG.info(
         "Committed to table {} with the new metadata location {}", fullName, newMetadataLocation);
   }

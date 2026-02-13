@@ -215,6 +215,10 @@ class GlueTableOperations extends BaseMetastoreTableOperations {
       Map<String, String> properties = prepareProperties(glueTable, newMetadataLocation);
       persistGlueTable(glueTable, properties, metadata, retryDetector);
       commitStatus = CommitStatus.SUCCESS;
+      if (base != null) {
+        fileLogs.add(new File2(base.metadataFileLocation(), File2.File2Type.DELETE, "metadata"));
+      }
+      fileLogs.add(new File2(newMetadataLocation, File2.File2Type.ADD, "metadata"));
     } catch (CommitFailedException e) {
       throw e;
     } catch (RuntimeException persistFailure) {
