@@ -23,6 +23,8 @@ package org.apache.iceberg.raven;
 
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.List;
 import java.util.Map;
 import org.apache.iceberg.raven.CatalogOuterClass.*;
@@ -32,8 +34,89 @@ public class RavenCatalog {
     private final ManagedChannel channel;
     private final CatalogGrpc.CatalogBlockingStub catalogStub;
 
+    public static class BufIterator {
+        private final byte[] buf;
+        private int elemSize = 0;
+        private int dataIdx = 0;
+        private int nextOffset = 0;
+        private boolean isNull = false;
+        private boolean valid = false;
+
+        public BufIterator(byte[] buf) {
+            this.buf = buf;
+            // Initialize first element logic
+            if (buf.length >= Integer.BYTES) {
+                this.elemSize = ByteBuffer.wrap(buf, 0, Integer.BYTES)
+                        .order(ByteOrder.LITTLE_ENDIAN)
+                        .getInt();
+                this.isNull = (elemSize == -1);
+                // Account for null
+                if (this.isNull) {
+                    elemSize = 0;
+                }
+                this.dataIdx = Integer.BYTES;
+                this.nextOffset = Integer.BYTES + this.elemSize;
+
+                if (this.nextOffset <= buf.length) {
+                    this.valid = true;
+                }
+            }
+        }
+
+        public boolean next() {
+            if (!valid) {
+                return false;
+            } else if (nextOffset + Integer.BYTES >= buf.length) {
+                // Logic matches Scala: if remaining bytes are <= 4, mark invalid.
+                valid = false;
+                return false;
+            } else {
+                this.elemSize = ByteBuffer.wrap(buf, nextOffset, Integer.BYTES)
+                        .order(ByteOrder.LITTLE_ENDIAN)
+                        .getInt();
+                this.dataIdx = nextOffset + Integer.BYTES;
+                this.isNull = (elemSize == -1);
+                // Account for null
+                if (this.isNull) {
+                    elemSize = 0;
+                }
+                this.nextOffset = this.dataIdx + this.elemSize;
+
+                if (this.nextOffset > buf.length) {
+                    valid = false;
+                    return false;
+                } else {
+                    valid = true;
+                    return true;
+                }
+            }
+        }
+
+        public boolean valid() {
+            return valid;
+        }
+
+        public int dataIdx() {
+            return dataIdx;
+        }
+
+        public int elemSize() {
+            return elemSize;
+        }
+    }
+
+
+
     public RavenCatalog(Map<String, String> conf) {
         ravenAddress = conf.get("raven.address");
+        String[] addressPort = ravenAddress.split(":", -1);
+        channel = ManagedChannelBuilder.forAddress(addressPort[0], Integer.parseInt(addressPort[1]))
+                .usePlaintext().build();
+        catalogStub = CatalogGrpc.newBlockingStub(channel);
+    }
+
+    public RavenCatalog(String address) {
+        this.ravenAddress = address;
         String[] addressPort = ravenAddress.split(":", -1);
         channel = ManagedChannelBuilder.forAddress(addressPort[0], Integer.parseInt(addressPort[1]))
                 .usePlaintext().build();

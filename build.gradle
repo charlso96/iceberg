@@ -1336,11 +1336,13 @@ project(':iceberg-exp') {
     annotationProcessor libs.immutables.value
     compileOnly libs.immutables.value
 
+    implementation(libs.parquet.hadoop)
     implementation libs.caffeine
     implementation libs.duckdb
     implementation platform(libs.jackson.bom)
     implementation libs.jackson.core
     implementation libs.jackson.databind
+    implementation libs.jackson.datatype.jsr310
     implementation libs.slf4j.simple
 
     implementation(platform(libs.awssdk.bom))

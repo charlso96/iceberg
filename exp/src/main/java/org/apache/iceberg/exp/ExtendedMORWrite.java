@@ -18,30 +18,43 @@
  */
 package org.apache.iceberg.exp;
 
+import static java.nio.charset.StandardCharsets.UTF_8;
+import static java.nio.file.StandardOpenOption.APPEND;
+import static java.nio.file.StandardOpenOption.CREATE;
 import static org.apache.iceberg.types.Types.NestedField.required;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import java.io.BufferedWriter;
 import java.io.File;
 import java.io.IOException;
 import java.net.URI;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalTime;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 import org.apache.hadoop.hive.conf.HiveConf;
-import org.apache.hadoop.hive.metastore.HiveMetaStoreClient;
-import org.apache.hadoop.hive.metastore.api.Database;
 import org.apache.iceberg.AppendFiles;
 import org.apache.iceberg.CatalogProperties;
 import org.apache.iceberg.CatalogUtil;
@@ -60,6 +73,9 @@ import org.apache.iceberg.aws.s3.S3FileIOProperties;
 import org.apache.iceberg.catalog.Namespace;
 import org.apache.iceberg.catalog.TableIdentifier;
 import org.apache.iceberg.hive.HiveCatalog;
+import org.apache.iceberg.raven.CatalogOuterClass.FileObject;
+import org.apache.iceberg.raven.CatalogOuterClass.TableObject;
+import org.apache.iceberg.raven.RavenCatalog;
 import org.apache.iceberg.relocated.com.google.common.collect.ImmutableMap;
 import org.apache.iceberg.relocated.com.google.common.collect.Lists;
 import org.apache.iceberg.relocated.com.google.common.collect.Maps;
@@ -74,9 +90,131 @@ public class ExtendedMORWrite {
   // 1. Add this private constructor
   private ExtendedMORWrite() {}
 
+  public static class MetricsExporter {
+    public static void exportMetricsToLog(String outputFile) {
+      ObjectMapper mapper = new ObjectMapper();
+      mapper.registerModule(new JavaTimeModule());
+      mapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+
+      // IMPORTANT: Disable pretty printing.
+      // NDJSON requires each object to be on exactly one line.
+      // If you pretty print, the newlines inside the object will break the format.
+      try (BufferedWriter writer = Files.newBufferedWriter(Paths.get(outputFile), UTF_8)) {
+        int size = LOAD_TABLE_TIMES.size();
+
+        for (int i = 0; i < size; i++) {
+          ObjectNode row = mapper.createObjectNode();
+
+          // 1. Build the object
+          addTimeBlock(mapper, row, "load_table", LOAD_TABLE_TIMES.get(i));
+          addTimeBlock(mapper, row, "insert_file", INSERT_FILE_TIMES.get(i));
+          addTimeBlock(mapper, row, "commit", COMMIT_TIMES.get(i));
+
+          if (i < COMPACT_TIMES.size()) {
+            addTimeBlock(mapper, row, "compact", COMPACT_TIMES.get(i));
+          }
+
+          ArrayNode filesArray = mapper.createArrayNode();
+          List<File2> fileList = ADDED_FILES.get(i);
+          if (fileList != null) {
+            for (File2 file : fileList) {
+              ObjectNode fileObj = mapper.createObjectNode();
+              fileObj.put("type", file.fileType().name().toLowerCase(Locale.getDefault()));
+              fileObj.put("path", file.path());
+              fileObj.put("tag", file.tag());
+              fileObj.put("size", getFileSize(file.path()));
+              filesArray.add(fileObj);
+            }
+          }
+          row.set("files", filesArray);
+
+          // 2. Write as single-line JSON string
+          String jsonLine = mapper.writeValueAsString(row);
+
+          // 3. Write to file + Newline
+          writer.write(jsonLine);
+          writer.newLine(); // This makes it valid NDJSON
+        }
+      }
+      catch (IOException e) {
+        LOG.info("IO Error during result output", e);
+      }
+
+    }
+
+    public static void appendSummaryToJson(String outputFile) {
+      ObjectMapper mapper = new ObjectMapper();
+
+      // 1. Calculate num_txn
+      int numTxn = LOAD_TABLE_TIMES.size();
+
+      // 2. Calculate num_files (Aggregating all files of type ADD)
+      long numFiles = 0;
+      for (List<File2> fileList : ADDED_FILES) {
+        if (fileList != null) {
+          numFiles += fileList.stream()
+                  .filter(f -> f.fileType() == File2.File2Type.ADD)
+                  .count();
+        }
+      }
+
+      // 3. Calculate avg_latency
+      double totalLatencyMillis = 0;
+
+      for (int i = 0; i < numTxn; i++) {
+        // Start: Always LOAD_TABLE start
+        Instant start = LOAD_TABLE_TIMES.get(i).start;
+
+        // End: COMPACT end if available, otherwise COMMIT end
+        Instant end;
+        if (i < COMPACT_TIMES.size()) {
+          end = COMPACT_TIMES.get(i).end;
+        } else {
+          // Fallback if compaction data is missing for this index
+          end = COMMIT_TIMES.get(i).end;
+        }
+
+        // Calculate duration in milliseconds
+        long duration = Duration.between(start, end).toMillis();
+        totalLatencyMillis += duration;
+      }
+
+      double avgLatency = (numTxn == 0) ? 0 : (totalLatencyMillis / numTxn);
+
+      // 4. Construct the JSON Object
+      ObjectNode summaryNode = mapper.createObjectNode();
+      summaryNode.put("exp_name", "ExtendedMORWrite");
+      summaryNode.put("exp_type", expType);
+      summaryNode.put("txn_per_compaction", txnPerCompaction);
+      summaryNode.put("duration", durationStr);
+      summaryNode.put("num_txn", numTxn);
+      summaryNode.put("num_files", numFiles);
+      summaryNode.put("avg_latency", avgLatency);
+
+      // 5. Append to file
+      // 'true' in FileWriter constructor enables append mode
+      try (BufferedWriter writer = Files.newBufferedWriter(Paths.get(outputFile), UTF_8, CREATE, APPEND)) {
+        String jsonLine = mapper.writeValueAsString(summaryNode);
+        writer.write(jsonLine);
+        writer.newLine(); // Add newline so it remains valid NDJSON
+      } catch (IOException e) {
+        LOG.info("IO Error during result output", e);
+      }
+    }
+
+    private static void addTimeBlock(ObjectMapper mapper, ObjectNode parent, String fieldName, TimePair timePair) {
+      if (timePair == null) return;
+      ObjectNode timeNode = mapper.createObjectNode();
+      timeNode.put("start", timePair.start.toString());
+      timeNode.put("end", timePair.end.toString());
+      parent.set(fieldName, timeNode);
+    }
+  }
+
+
   public static class TimePair {
-    private final Instant start;
-    private final Instant end;
+    public final Instant start;
+    public final Instant end;
 
     public TimePair(Instant start, Instant end) {
       this.start = start;
@@ -92,16 +230,19 @@ public class ExtendedMORWrite {
 
   private static final Logger LOG = LoggerFactory.getLogger(ExtendedMORWrite.class);
   private static final ObjectMapper JSON_MAPPER = new ObjectMapper();
-//  private static ExpCatalogExtension hiveMetastoreExtension;
+  private static String expType;
+  private static String durationStr;
+  private static String workspaceName;
   private static String dbName;
   private static String tableName;
   private static int numRowsPerFile;
-  //  private static int TXN_PER_COMPACTION;
+  private static int txnPerCompaction;
   private static String warehouseLocation;
   private static String s3Secret;
   private static String s3KeyId;
   private static String s3Region;
   private static S3Client s3;
+  private static String ravenAddress;
   static final Schema SCHEMA =
       new Schema(
           Types.StructType.of(
@@ -130,14 +271,17 @@ public class ExtendedMORWrite {
 
   // hive catalog
   private static HiveCatalog catalog;
+  private static RavenCatalog ravenCatalog;
   private static DuckDBConnection duckDbConn;
 
   // data structures for measurements
   private static final List<TimePair> LOAD_TABLE_TIMES = Lists.newArrayList();
   private static final List<TimePair> INSERT_FILE_TIMES = Lists.newArrayList();
   private static final List<TimePair> COMMIT_TIMES = Lists.newArrayList();
-  //  private static final List<TimePair> COMPACT_TIMES = Lists.newArrayList();
+  private static final List<TimePair> COMPACT_TIMES = Lists.newArrayList();
   private static final List<List<File2>> ADDED_FILES = Lists.newArrayList();
+  // thread pool for s3 operations
+  private static ExecutorService s3Executors;
 
   public static Map<String, String> parseJsonToMap(String jsonFilePath) throws IOException {
     File file = new File(jsonFilePath);
@@ -193,23 +337,28 @@ public class ExtendedMORWrite {
     // System.setProperty("datanucleus.plugin.pluginRegistryBundleCheck", "LOG");
     // read the config file for experimentation
     Map<String, String> expConfigs = parseJsonToMap(args[0]);
+    expType = expConfigs.get("exp_type");
+    durationStr = expConfigs.get("duration");
+    workspaceName = expConfigs.get("workspace_name");
     dbName = expConfigs.get("db_name");
     tableName = expConfigs.get("table_name");
     numRowsPerFile = Integer.parseInt(expConfigs.get("num_rows_per_file"));
     warehouseLocation = expConfigs.get("warehouse_location");
-    //    TXN_PER_COMPACTION = Integer.parseInt(expConfigs.get("txn_per_compaction"));
+    txnPerCompaction = Integer.parseInt(expConfigs.get("txn_per_compaction"));
     s3Secret = expConfigs.get("s3_secret");
     s3KeyId = expConfigs.get("s3_key_id");
     s3Region = expConfigs.get("s3_region");
+    ravenAddress = expConfigs.get("raven_address");
 
     initCatalog();
-
     PartitionSpec spec = PartitionSpec.builderFor(SCHEMA).build();
     TableIdentifier tableIdent = TableIdentifier.of(dbName, tableName);
     String location = String.format("%s/%s.db/%s", warehouseLocation, dbName, tableName);
     catalog.createNamespace(Namespace.of(dbName));
     catalog.createTable(tableIdent, SCHEMA, spec, location, ImmutableMap.of());
     duckDbConn = (DuckDBConnection) DriverManager.getConnection("jdbc:duckdb:");
+    s3Executors = Executors.newFixedThreadPool(txnPerCompaction + 1);
+
     try (Statement stmt = duckDbConn.createStatement()) {
       stmt.execute("INSTALL httpfs; LOAD httpfs;");
       stmt.execute("INSTALL parquet; LOAD parquet;");
@@ -223,13 +372,13 @@ public class ExtendedMORWrite {
       stmt.execute(secretSql);
     }
 
-    if (expConfigs.get("exp_type").equals("raven")) {
-      //      runRavenExp(expConfigs);
+    if (expType.equals("raven")) {
+      runRavenExp(expConfigs);
     } else {
       runVanillaExp(expConfigs);
     }
 
-//    hiveMetastoreExtension.afterAll();
+    s3Executors.shutdown();
   }
 
   private static String schemaToTargetList(Schema schema) {
@@ -255,7 +404,7 @@ public class ExtendedMORWrite {
     return sb.toString();
   }
 
-  private static Metrics computeMetrics(Schema schema) {
+  private static Metrics computeStats(Schema schema) {
     Map<Integer, Long> valueCounts = Maps.newHashMap();
     Map<Integer, Long> nullValueCounts = Maps.newHashMap();
     Map<Integer, Long> nanValueCounts = Maps.newHashMap();
@@ -270,110 +419,275 @@ public class ExtendedMORWrite {
     return new Metrics((long) numRowsPerFile, null, valueCounts, nullValueCounts, nanValueCounts);
   }
 
-  //  private static void runRavenExp(Map<String, String> expConfigs) {}
+  private static void runRavenExp(Map<String, String> expConfigs) {
+    ravenCatalog = new RavenCatalog(ravenAddress);
+    LocalTime duration = LocalTime.parse(durationStr);
+    runRavenExpImpl(duration);
+
+    String expResultDir = expConfigs.get("exp_result_dir");
+    String logFileName = String.format(Locale.getDefault(),"%s/extendedmorwrite-iceberg-raven-%d-log.json",
+            expResultDir, numRowsPerFile);
+    String summaryFileName = String.format("%s/summary.json", expResultDir);
+    MetricsExporter.exportMetricsToLog(logFileName);
+    MetricsExporter.appendSummaryToJson(summaryFileName);
+  }
 
   private static void runVanillaExp(Map<String, String> expConfigs) {
-    LocalTime duration = LocalTime.parse(expConfigs.get("duration"));
-    runTaskForDuration(
-        ExtendedMORWrite::runVanillaExpImpl, duration.toSecondOfDay(), TimeUnit.SECONDS);
+    LocalTime duration = LocalTime.parse(durationStr);
+    runVanillaExpImpl(duration);
 
-    // TODO figure out how to output the result as files
-    //    String expLocation = expConfigs.get("exp_location");
-    //    String logFileName = String.format("morwrite-iceberg-vanilla-%d-log.json",
-    // numRowsPerFile);
-    //    String summaryFileName =
-    //        String.format("morwrite-iceberg-vanilla-%d-summary.json", numRowsPerFile);
-    LOG.info("Length of list: {}", ADDED_FILES.size());
+    String expResultDir = expConfigs.get("exp_result_dir");
+    String logFileName = String.format(Locale.getDefault(),"%s/extendedmorwrite-iceberg-vanilla-%d-log.json",
+            expResultDir, numRowsPerFile);
+    String summaryFileName = String.format("%s/summary.json", expResultDir);
+    MetricsExporter.exportMetricsToLog(logFileName);
+    MetricsExporter.appendSummaryToJson(summaryFileName);
   }
 
-  private static void runVanillaExpImpl() {
-    String targetList = schemaToTargetList(SCHEMA);
-    PartitionSpec spec = PartitionSpec.builderFor(SCHEMA).build();
+  private static void runRavenExpImpl(LocalTime duration) {
+    runTaskForDuration(running -> {
+      String targetList = schemaToTargetList(SCHEMA);
+      PartitionSpec spec = PartitionSpec.builderFor(SCHEMA).build();
 
-    // Keep running until interrupted
-    while (!Thread.currentThread().isInterrupted()) {
-      try (Statement stmt = duckDbConn.createStatement()) {
-        List<File2> fileLogs = Lists.newArrayList();
+      Table table = catalog.loadTable(TableIdentifier.of(dbName, tableName));
+      // Keep running until flag change
+      while (running.get()) {
+        try (Statement stmt = duckDbConn.createStatement()) {
+          List<File2> fileLogs = Lists.newArrayList();
+          Instant beforeLoadTable = Instant.now();
 
-        Instant beforeLoadTable = Instant.now();
+          // Load table. Load from both hive and raven
+          TableObject tableObject = ravenCatalog.loadTable(workspaceName, dbName, tableName);
+          Instant afterLoadTable = Instant.now();
 
-        // load table & start transaction
-        Table table = catalog.loadTable(TableIdentifier.of(dbName, tableName));
-        AppendFiles txn = table.newFastAppend();
+          // generate data
+          stmt.execute(
+                  String.format(
+                          Locale.getDefault(),
+                          "CREATE TEMP TABLE staging_data AS SELECT %s FROM generate_series(1, %d) AS t(x);",
+                          targetList,
+                          numRowsPerFile));
 
-        Instant afterLoadTable = Instant.now();
+          // write the data to S3 as a parquet file
+          String filePath = String.format("%s/%s.parquet", table.location(), UUID.randomUUID());
+          stmt.execute(
+                  String.format(
+                          Locale.getDefault(), "COPY staging_data TO '%s' (FORMAT PARQUET);", filePath));
+          stmt.execute("DROP TABLE staging_data;");
 
-        // generate data
-        stmt.execute(
-            String.format(
-                Locale.getDefault(),
-                "CREATE TEMP TABLE staging_data AS SELECT %s FROM generate_series(1, %d) AS t(x);",
-                targetList,
-                numRowsPerFile));
+          long fileSize = getFileSize(filePath);
 
-        // construct file statistics
-        Metrics metrics = computeMetrics(SCHEMA);
+          Instant afterInsertFile = Instant.now();
 
-        // write the data to S3 as a parquet file
-        String filePath = String.format("%s/%s", table.location(), UUID.randomUUID());
-        stmt.execute(
-            String.format(
-                Locale.getDefault(), "COPY staging_data TO '%s' (FORMAT PARQUET);", filePath));
-        stmt.execute("DROP TABLE staging_data;");
+          FileObject newFileObject = FileObject.newBuilder().setPath(filePath).setSize((int) fileSize)
+                  .setFormat("parquet").setTag("newdata").build();
+          List<FileObject> newFilesList = Lists.newArrayList();
+          newFilesList.add(newFileObject);
 
-        long fileSize = getFileSize(filePath);
+          ravenCatalog.finalAppendFiles(tableObject, newFilesList);
 
-        Instant afterInsertFile = Instant.now();
+          Instant afterCommit = Instant.now();
+          Instant afterCompact = afterCommit;
 
-        DataFile newFile =
-            DataFiles.builder(spec)
-                .withFileSizeInBytes(fileSize)
-                .withFormat(FileFormat.PARQUET)
-                .withMetrics(metrics)
-                .withPath(filePath)
-                .build();
+          // perform compaction
+          // 1. Get the newdata files, using ExecQuery
+          // 2. Read the newdata files, collecting statistics information, using DuckDB.
+          // 3. Commit the newdata files to Iceberg and get the metadata file, manifestlist file, and manifest file.
+          // 4. Replace the newdata files with different tags, Replace the metadata file, manifestlist file, and manifest file.
+          if (tableObject.getSnapshotVid() % txnPerCompaction == 0) {
+            tableObject = ravenCatalog.loadTable(workspaceName, dbName, tableName);
+            String query = String.format(Locale.getDefault(),
+                    "SELECT file_path, file_size, format FROM FILELIST SNAPSHOT TableSnapshot(%d, %d) WHERE tag = 'newdata'",
+                    tableObject.getSnapshotObjId(), tableObject.getSnapshotVid());
 
-        txn.appendFile(newFile);
-        txn.commit2(fileLogs);
+            byte[] resultSet = ravenCatalog.execQuery(query);
+            // extract the newdata files from the result set buffer
+            List<FileObject> newDataFiles = Lists.newArrayList();
+            RavenCatalog.BufIterator bufIter = new RavenCatalog.BufIterator(resultSet);
+            while (bufIter.valid()) {
+              String path = new String(resultSet, bufIter.dataIdx(), bufIter.elemSize(), UTF_8);
+              bufIter.next();
+              String size = new String(resultSet, bufIter.dataIdx(), bufIter.elemSize(), UTF_8);
+              bufIter.next();
+              String format = new String(resultSet, bufIter.dataIdx(), bufIter.elemSize(), UTF_8);
+              bufIter.next();
+              // change tag to data
+              FileObject file = FileObject.newBuilder().setPath(path).setSize(Integer.parseInt(size))
+                      .setFormat(format).setTag("data").build();
+              newDataFiles.add(file);
+            }
 
-        Instant afterCommit = Instant.now();
+            // start Iceberg transaction
+            AppendFiles txn = table.newFastAppend();
 
-        LOAD_TABLE_TIMES.add(new TimePair(beforeLoadTable, afterLoadTable));
-        INSERT_FILE_TIMES.add(new TimePair(afterLoadTable, afterInsertFile));
-        COMMIT_TIMES.add(new TimePair(afterInsertFile, afterCommit));
-        ADDED_FILES.add(fileLogs);
-      } catch (SQLException e) {
-        LOG.info("Database error occurred", e);
+            // extract the statistics information from the parquet files
+            List<Callable<Metrics>> s3Tasks = Lists.newArrayList();
+            for (FileObject file : newDataFiles) {
+              s3Tasks.add(() -> S3ParquetStats.extractStats(s3, file.getPath()));
+            }
+            // stats extraction is performed in parallel for performance
+            try {
+              List<Future<Metrics>> stats = s3Executors.invokeAll(s3Tasks);
+              for (int i = 0; i < newDataFiles.size(); i++) {
+                DataFile newDataFile =
+                        DataFiles.builder(spec)
+                                .withFileSizeInBytes(newDataFiles.get(i).getSize())
+                                .withFormat(FileFormat.PARQUET)
+                                .withMetrics(stats.get(i).get())
+                                .withPath(newDataFiles.get(i).getPath())
+                                .build();
+                txn.appendFile(newDataFile);
+              }
+            }
+            catch (InterruptedException | ExecutionException e) {
+              LOG.info("InterruptedException or ExecutionException", e);
+            }
+
+            // commit to Iceberg
+            txn.commit2(fileLogs);
+
+            // 4. Replace the newdata files with different tags, Replace the metadata file, manifestlist file, and manifest file.
+            List<String> filesToReplace = Lists.newArrayList();
+
+            // newdata files to replace (changing the tags to 'data')
+            for (FileObject file : newDataFiles) {
+              filesToReplace.add(file.getPath());
+            }
+
+            // metadata files (metadata, manifestlist, manifest) to replace & add
+            for (File2 file : fileLogs) {
+              switch (file.fileType()) {
+                case ADD:
+                  FileObject newMetadataFileObject = FileObject.newBuilder()
+                          .setTag(file.tag()).setPath(file.path()).build();
+                  // reusing newDataFiles list to hold all new files to add
+                  newDataFiles.add(newMetadataFileObject);
+                  break;
+                case DELETE:
+                  filesToReplace.add(file.path());
+                  break;
+                default:
+                  break;
+              }
+            }
+
+            ravenCatalog.finalRewriteFiles(tableObject, filesToReplace, newDataFiles);
+
+            afterCompact = Instant.now();
+          }
+
+          LOAD_TABLE_TIMES.add(new TimePair(beforeLoadTable, afterLoadTable));
+          INSERT_FILE_TIMES.add(new TimePair(afterLoadTable, afterInsertFile));
+          COMMIT_TIMES.add(new TimePair(afterInsertFile, afterCommit));
+          COMPACT_TIMES.add(new TimePair(afterCommit, afterCompact));
+          fileLogs.add(new File2(filePath, File2.File2Type.ADD, "data"));
+          ADDED_FILES.add(fileLogs);
+        } catch (SQLException e) {
+          LOG.info("Database error occurred", e);
+        }
       }
-    }
+    }, duration.toSecondOfDay(), TimeUnit.SECONDS);
+
   }
 
-  public static void runTaskForDuration(Runnable task, long duration, TimeUnit unit) {
+  private static void runVanillaExpImpl(LocalTime duration) {
+    runTaskForDuration(running -> {
+      String targetList = schemaToTargetList(SCHEMA);
+      PartitionSpec spec = PartitionSpec.builderFor(SCHEMA).build();
+
+      // Keep running until flag change
+      while (running.get()) {
+        try (Statement stmt = duckDbConn.createStatement()) {
+          List<File2> fileLogs = Lists.newArrayList();
+
+          Instant beforeLoadTable = Instant.now();
+
+          // load table & start transaction
+          Table table = catalog.loadTable(TableIdentifier.of(dbName, tableName));
+          AppendFiles txn = table.newFastAppend();
+
+          Instant afterLoadTable = Instant.now();
+
+          // generate data
+          stmt.execute(
+                  String.format(
+                          Locale.getDefault(),
+                          "CREATE TEMP TABLE staging_data AS SELECT %s FROM generate_series(1, %d) AS t(x);",
+                          targetList,
+                          numRowsPerFile));
+
+          // construct file statistics
+          Metrics metrics = computeStats(SCHEMA);
+
+          // write the data to S3 as a parquet file
+          String filePath = String.format("%s/%s.parquet", table.location(), UUID.randomUUID());
+          stmt.execute(
+                  String.format(
+                          Locale.getDefault(), "COPY staging_data TO '%s' (FORMAT PARQUET);", filePath));
+          stmt.execute("DROP TABLE staging_data;");
+
+          long fileSize = getFileSize(filePath);
+
+          Instant afterInsertFile = Instant.now();
+
+          DataFile newFile =
+                  DataFiles.builder(spec)
+                          .withFileSizeInBytes(fileSize)
+                          .withFormat(FileFormat.PARQUET)
+                          .withMetrics(metrics)
+                          .withPath(filePath)
+                          .build();
+
+          txn.appendFile(newFile);
+          txn.commit2(fileLogs);
+
+          Instant afterCommit = Instant.now();
+
+          LOAD_TABLE_TIMES.add(new TimePair(beforeLoadTable, afterLoadTable));
+          INSERT_FILE_TIMES.add(new TimePair(afterLoadTable, afterInsertFile));
+          COMMIT_TIMES.add(new TimePair(afterInsertFile, afterCommit));
+          // also add the new data file
+          fileLogs.add(new File2(filePath, File2.File2Type.ADD, "data"));
+          ADDED_FILES.add(fileLogs);
+        } catch (SQLException e) {
+          LOG.info("Database error occurred", e);
+        }
+      }
+    }, duration.toSecondOfDay(), TimeUnit.SECONDS);
+
+  }
+
+  public static void runTaskForDuration(Consumer<AtomicBoolean> task, long duration, TimeUnit unit) {
+    AtomicBoolean running = new AtomicBoolean(true); // The "Green Light"
     ExecutorService executor = Executors.newSingleThreadExecutor();
     ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
 
-    // Start the task
-    Future<?> future = executor.submit(task);
-
-    // Schedule the interruption
+    // Submit the task, passing the control flag 'running' to it
     @SuppressWarnings("unused")
-    Future<?> future2 =
-        scheduler.schedule(
-            () -> {
-              future.cancel(true); // 'true' allows interrupting the thread
-              executor.shutdownNow();
-              scheduler.shutdown();
-            },
-            duration,
-            unit);
+    Future<?> future = executor.submit(() -> task.accept(running));
 
-    // Keep main thread alive until scheduler finishes (optional)
+    // Schedule the "Stop Signal"
+    @SuppressWarnings("unused")
+    Future<?> future2 = scheduler.schedule(() -> {
+      running.set(false); // Flip the switch to Red
+      scheduler.shutdown();
+    }, duration, unit);
+
+    // Shutdown executor safely
+    executor.shutdown();
     try {
-      executor.awaitTermination(duration + 3, unit);
+      // Wait for the task to finish its LAST iteration naturally.
+      // We add a buffer (e.g., duration * 2) to ensure we don't kill it mid-process.
+      // Since you prefer accuracy trade-offs over exceptions, we wait longer.
+      if (!executor.awaitTermination(duration + 5, unit)) {
+        executor.shutdownNow(); // Force kill only if it's genuinely stuck forever
+      }
     } catch (InterruptedException e) {
+      executor.shutdownNow();
       Thread.currentThread().interrupt();
     }
   }
+
 
   private static long getFileSize(String path) {
     URI uri = URI.create(path);
