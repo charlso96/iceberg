@@ -425,8 +425,8 @@ public class ExtendedMORWrite {
     runRavenExpImpl(duration);
 
     String expResultDir = expConfigs.get("exp_result_dir");
-    String logFileName = String.format(Locale.getDefault(),"%s/extendedmorwrite-iceberg-raven-%d-log.json",
-            expResultDir, numRowsPerFile);
+    String logFileName = String.format(Locale.getDefault(),"%s/extendedmorwrite2-iceberg-raven-%d-%d-log.json",
+            expResultDir, txnPerCompaction, numRowsPerFile);
     String summaryFileName = String.format("%s/summary.json", expResultDir);
     MetricsExporter.exportMetricsToLog(logFileName);
     MetricsExporter.appendSummaryToJson(summaryFileName);
@@ -437,8 +437,8 @@ public class ExtendedMORWrite {
     runVanillaExpImpl(duration);
 
     String expResultDir = expConfigs.get("exp_result_dir");
-    String logFileName = String.format(Locale.getDefault(),"%s/extendedmorwrite-iceberg-vanilla-%d-log.json",
-            expResultDir, numRowsPerFile);
+    String logFileName = String.format(Locale.getDefault(),"%s/extendedmorwrite2-iceberg-vanilla-%d-%d-log.json",
+            expResultDir, txnPerCompaction, numRowsPerFile);
     String summaryFileName = String.format("%s/summary.json", expResultDir);
     MetricsExporter.exportMetricsToLog(logFileName);
     MetricsExporter.appendSummaryToJson(summaryFileName);
