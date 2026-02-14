@@ -667,11 +667,11 @@ abstract class SnapshotProducer<ThisT> implements SnapshotUpdate<ThisT> {
       }
     }
 
-    try {
-      notifyListeners();
-    } catch (Throwable e) {
-      LOG.warn("Failed to notify event listeners", e);
-    }
+//    try {
+//      notifyListeners();
+//    } catch (Throwable e) {
+//      LOG.warn("Failed to notify event listeners", e);
+//    }
   }
 
   private void notifyListeners() {

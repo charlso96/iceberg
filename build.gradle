@@ -774,6 +774,7 @@ project(':iceberg-hive-metastore') {
     implementation project(':iceberg-core')
     api project(':iceberg-api')
     implementation project(':iceberg-common')
+    implementation project(path: ':iceberg-raven', configuration: 'shadow')
     annotationProcessor libs.immutables.value
     compileOnly libs.immutables.value
 
