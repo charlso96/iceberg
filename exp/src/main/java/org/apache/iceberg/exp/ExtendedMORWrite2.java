@@ -33,6 +33,8 @@ import java.io.BufferedWriter;
 import java.io.File;
 import java.io.IOException;
 import java.net.URI;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.sql.DriverManager;
@@ -69,6 +71,7 @@ import org.apache.iceberg.aws.s3.S3FileIOProperties;
 import org.apache.iceberg.catalog.Namespace;
 import org.apache.iceberg.catalog.TableIdentifier;
 import org.apache.iceberg.hive.HiveCatalog;
+import org.apache.iceberg.hive.HiveCatalog2;
 import org.apache.iceberg.raven.CatalogOuterClass.FileObject;
 import org.apache.iceberg.raven.CatalogOuterClass.TableObject;
 import org.apache.iceberg.raven.RavenCatalog;
@@ -248,21 +251,22 @@ public class ExtendedMORWrite2 {
                                     required(8, "ss_promo_sk", Types.IntegerType.get()),
                                     required(9, "ss_ticket_number", Types.IntegerType.get()),
                                     required(10, "ss_wholesale_cost", Types.IntegerType.get()),
-                                    required(11, "ss_list_price", Types.DecimalType.of(11, 2)),
-                                    required(12, "ss_sales_price", Types.DecimalType.of(11, 2)),
-                                    required(13, "ss_ext_discount_amt", Types.DecimalType.of(11, 2)),
-                                    required(14, "ss_ext_sales_price", Types.DecimalType.of(11, 2)),
-                                    required(15, "ss_ext_wholesale_cost", Types.DecimalType.of(11, 2)),
-                                    required(16, "ss_ext_list_price", Types.DecimalType.of(11, 2)),
-                                    required(17, "ss_ext_tax", Types.DecimalType.of(11, 2)),
-                                    required(18, "ss_coupon_amt", Types.DecimalType.of(11, 2)),
-                                    required(19, "ss_net_paid", Types.DecimalType.of(11, 2)),
-                                    required(20, "ss_net_paid_inc_tax", Types.DecimalType.of(11, 2)),
-                                    required(21, "ss_net_profit", Types.DecimalType.of(11, 2)))
+                                    required(11, "ss_list_price", Types.IntegerType.get()),
+                                    required(12, "ss_sales_price", Types.IntegerType.get()),
+                                    required(13, "ss_ext_discount_amt", Types.IntegerType.get()),
+                                    required(14, "ss_ext_sales_price", Types.IntegerType.get()),
+                                    required(15, "ss_ext_wholesale_cost", Types.IntegerType.get()),
+                                    required(16, "ss_ext_list_price", Types.IntegerType.get()),
+                                    required(17, "ss_ext_tax", Types.IntegerType.get()),
+                                    required(18, "ss_coupon_amt", Types.IntegerType.get()),
+                                    required(19, "ss_net_paid", Types.IntegerType.get()),
+                                    required(20, "ss_net_paid_inc_tax", Types.IntegerType.get()),
+                                    required(21, "ss_net_profit", Types.IntegerType.get()))
                             .fields());
 
     // hive catalog
     private static HiveCatalog catalog;
+    private static HiveCatalog2 catalog2;
     private static RavenCatalog ravenCatalog;
     private static DuckDBConnection duckDbConn;
 
@@ -313,16 +317,30 @@ public class ExtendedMORWrite2 {
         conf.put(S3FileIOProperties.ACCESS_KEY_ID, s3KeyId);
         conf.put(S3FileIOProperties.SECRET_ACCESS_KEY, s3Secret);
         conf.put(AwsClientProperties.CLIENT_REGION, s3Region);
+        conf.put("raven_address", ravenAddress);
+        conf.put("workspace_name", workspaceName);
         //        conf.put(S3FileIOProperties.SESSION_TOKEN, StaticClientFactory.class.getName());
         // for accessing s3 later on
         AwsClientFactories.defaultFactory().initialize(conf);
         s3 = AwsClientFactories.defaultFactory().s3();
-        catalog =
-                (HiveCatalog)
-                        CatalogUtil.loadCatalog(
-                                HiveCatalog.class.getName(),
-                                CatalogUtil.ICEBERG_CATALOG_TYPE_HIVE,
-                                conf, hiveConf);
+        catalog = null;
+        catalog2 = null;
+        if (expType.equals("raven")) {
+            catalog2 =
+                    (HiveCatalog2)
+                            CatalogUtil.loadCatalog(
+                                    HiveCatalog2.class.getName(),
+                                    CatalogUtil.ICEBERG_CATALOG_TYPE_HIVE,
+                                    conf, hiveConf);
+        }
+        else {
+            catalog =
+                    (HiveCatalog)
+                            CatalogUtil.loadCatalog(
+                                    HiveCatalog.class.getName(),
+                                    CatalogUtil.ICEBERG_CATALOG_TYPE_HIVE,
+                                    conf, hiveConf);
+        }
     }
 
     public static void main(String[] args) throws Exception {
@@ -343,11 +361,6 @@ public class ExtendedMORWrite2 {
         ravenAddress = expConfigs.get("raven_address");
 
         initCatalog();
-        PartitionSpec spec = PartitionSpec.builderFor(SCHEMA).build();
-        TableIdentifier tableIdent = TableIdentifier.of(dbName, tableName);
-        String location = String.format("%s/%s.db/%s", warehouseLocation, dbName, tableName);
-        catalog.createNamespace(Namespace.of(dbName));
-        catalog.createTable(tableIdent, SCHEMA, spec, location, ImmutableMap.of());
         duckDbConn = (DuckDBConnection) DriverManager.getConnection("jdbc:duckdb:");
         s3Executors = Executors.newFixedThreadPool(txnPerCompaction + 1);
 
@@ -400,18 +413,45 @@ public class ExtendedMORWrite2 {
         Map<Integer, Long> valueCounts = Maps.newHashMap();
         Map<Integer, Long> nullValueCounts = Maps.newHashMap();
         Map<Integer, Long> nanValueCounts = Maps.newHashMap();
-        //
+        Map<Integer, ByteBuffer> lowerBounds = Maps.newHashMap();
+        Map<Integer, ByteBuffer> upperBounds = Maps.newHashMap();
+
+        ByteBuffer lowerBound = ByteBuffer.allocate(Integer.BYTES);
+        lowerBound.order(ByteOrder.LITTLE_ENDIAN); // Set byte order
+        lowerBound.putInt(1);
+        lowerBound.rewind();
+
+        ByteBuffer upperBound = ByteBuffer.allocate(Integer.BYTES);
+        upperBound.order(ByteOrder.LITTLE_ENDIAN); // Set byte order
+        upperBound.putInt(numRowsPerFile);
+        upperBound.rewind();
+
         List<Types.NestedField> columns = schema.columns();
         for (Types.NestedField column : columns) {
             valueCounts.put(column.fieldId(), (long) numRowsPerFile);
             nullValueCounts.put(column.fieldId(), 0L);
             nanValueCounts.put(column.fieldId(), 0L);
+            switch (column.type().typeId()) {
+                case INTEGER:
+                    lowerBounds.put(column.fieldId(), lowerBound);
+                    upperBounds.put(column.fieldId(), upperBound);
+                    break;
+                default:
+                    break;
+            }
         }
 
-        return new Metrics((long) numRowsPerFile, null, valueCounts, nullValueCounts, nanValueCounts);
+        return new Metrics((long) numRowsPerFile, null, valueCounts, nullValueCounts,
+                nanValueCounts, lowerBounds, upperBounds);
     }
 
     private static void runRavenExp(Map<String, String> expConfigs) {
+        PartitionSpec spec = PartitionSpec.builderFor(SCHEMA).build();
+        TableIdentifier tableIdent = TableIdentifier.of(dbName, tableName);
+        String location = String.format("%s/%s.db/%s", warehouseLocation, dbName, tableName);
+        catalog2.createNamespace(Namespace.of(dbName));
+        catalog2.createTable(tableIdent, SCHEMA, spec, location, ImmutableMap.of());
+
         ravenCatalog = new RavenCatalog(ravenAddress);
         runRavenExpImpl();
 
@@ -424,6 +464,12 @@ public class ExtendedMORWrite2 {
     }
 
     private static void runVanillaExp(Map<String, String> expConfigs) {
+        PartitionSpec spec = PartitionSpec.builderFor(SCHEMA).build();
+        TableIdentifier tableIdent = TableIdentifier.of(dbName, tableName);
+        String location = String.format("%s/%s.db/%s", warehouseLocation, dbName, tableName);
+        catalog.createNamespace(Namespace.of(dbName));
+        catalog.createTable(tableIdent, SCHEMA, spec, location, ImmutableMap.of());
+
         runVanillaExpImpl();
 
         String expResultDir = expConfigs.get("exp_result_dir");
@@ -438,7 +484,7 @@ public class ExtendedMORWrite2 {
         String targetList = schemaToTargetList(SCHEMA);
         PartitionSpec spec = PartitionSpec.builderFor(SCHEMA).build();
 
-        Table table = catalog.loadTable(TableIdentifier.of(dbName, tableName));
+        Table table = catalog2.loadTable(TableIdentifier.of(dbName, tableName));
         // Keep running until flag change
         for (int i = 0; i < numTxn; i++) {
             try (Statement stmt = duckDbConn.createStatement()) {

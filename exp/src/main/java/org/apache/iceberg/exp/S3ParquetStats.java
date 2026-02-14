@@ -22,6 +22,7 @@
 package org.apache.iceberg.exp;
 
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import org.apache.iceberg.Metrics;
 import org.apache.iceberg.relocated.com.google.common.collect.Maps;
@@ -44,6 +45,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.List;
 
+
 public class S3ParquetStats {
     private S3ParquetStats() {}
 
@@ -57,6 +59,8 @@ public class S3ParquetStats {
         Map<Integer, Long> valueCounts = Maps.newHashMap();
         Map<Integer, Long> nullValueCounts = Maps.newHashMap();
         Map<Integer, Long> nanValueCounts = Maps.newHashMap();
+        Map<Integer, ByteBuffer> lowerBounds = Maps.newHashMap();
+        Map<Integer, ByteBuffer> upperBounds = Maps.newHashMap();
 
         try {
             // 1. Create the bridge to S3
@@ -86,6 +90,137 @@ public class S3ParquetStats {
                         long numNulls = stats.getNumNulls();
                         valueCounts.put(i + 1, valueCounts.get(i + 1) + blockRowCount - numNulls);
                         nullValueCounts.put(i + 1, nullValueCounts.get(i + 1) + numNulls);
+
+                        ByteBuffer min = ByteBuffer.wrap(stats.getMinBytes());
+                        ByteBuffer max = ByteBuffer.wrap(stats.getMaxBytes());
+
+                        switch (blockColumns.get(i).getPrimitiveType().getPrimitiveTypeName()) {
+                            case INT32:
+                                if (lowerBounds.containsKey(i + 1)) {
+                                    if (min.order(java.nio.ByteOrder.LITTLE_ENDIAN).getInt() <
+                                            lowerBounds.get(i + 1).getInt()) {
+                                        lowerBounds.put(i + 1, min);
+                                    }
+                                }
+                                else {
+                                    lowerBounds.put(i + 1, min.order(java.nio.ByteOrder.LITTLE_ENDIAN));
+                                }
+
+                                if (upperBounds.containsKey(i + 1)) {
+                                    if (max.order(java.nio.ByteOrder.LITTLE_ENDIAN).getInt() >
+                                            upperBounds.get(i + 1).getInt()) {
+                                        upperBounds.put(i + 1, max);
+                                    }
+                                }
+                                else {
+                                    upperBounds.put(i + 1, max.order(java.nio.ByteOrder.LITTLE_ENDIAN));
+                                }
+                                break;
+                            case INT64:
+                                if (lowerBounds.containsKey(i + 1)) {
+                                    if (min.order(java.nio.ByteOrder.LITTLE_ENDIAN).getLong() <
+                                            lowerBounds.get(i + 1).getLong()) {
+                                        lowerBounds.put(i + 1, min);
+                                    }
+                                }
+                                else {
+                                    lowerBounds.put(i + 1, min.order(java.nio.ByteOrder.LITTLE_ENDIAN));
+                                }
+
+                                if (upperBounds.containsKey(i + 1)) {
+                                    if (max.order(java.nio.ByteOrder.LITTLE_ENDIAN).getLong() >
+                                            upperBounds.get(i + 1).getLong()) {
+                                        upperBounds.put(i + 1, max);
+                                    }
+                                }
+                                else {
+                                    upperBounds.put(i + 1, max.order(java.nio.ByteOrder.LITTLE_ENDIAN));
+                                }
+                                break;
+                            case FLOAT:
+                                if (lowerBounds.containsKey(i + 1)) {
+                                    if (min.order(java.nio.ByteOrder.LITTLE_ENDIAN).getFloat() <
+                                            lowerBounds.get(i + 1).getFloat()) {
+                                        lowerBounds.put(i + 1, min);
+                                    }
+                                }
+                                else {
+                                    lowerBounds.put(i + 1, min.order(java.nio.ByteOrder.LITTLE_ENDIAN));
+                                }
+
+                                if (upperBounds.containsKey(i + 1)) {
+                                    if (max.order(java.nio.ByteOrder.LITTLE_ENDIAN).getFloat() >
+                                            upperBounds.get(i + 1).getFloat()) {
+                                        upperBounds.put(i + 1, max);
+                                    }
+                                }
+                                else {
+                                    upperBounds.put(i + 1, max.order(java.nio.ByteOrder.LITTLE_ENDIAN));
+                                }
+                                break;
+                            case DOUBLE:
+                                if (lowerBounds.containsKey(i + 1)) {
+                                    if (min.order(java.nio.ByteOrder.LITTLE_ENDIAN).getDouble() <
+                                            lowerBounds.get(i + 1).getDouble()) {
+                                        lowerBounds.put(i + 1, min);
+                                    }
+                                }
+                                else {
+                                    lowerBounds.put(i + 1, min.order(java.nio.ByteOrder.LITTLE_ENDIAN));
+                                }
+
+                                if (upperBounds.containsKey(i + 1)) {
+                                    if (max.order(java.nio.ByteOrder.LITTLE_ENDIAN).getDouble() >
+                                            upperBounds.get(i + 1).getDouble()) {
+                                        upperBounds.put(i + 1, max);
+                                    }
+                                }
+                                else {
+                                    upperBounds.put(i + 1, max.order(java.nio.ByteOrder.LITTLE_ENDIAN));
+                                }
+                                break;
+                            case BINARY:
+                                if (lowerBounds.containsKey(i + 1)) {
+                                    if (StandardCharsets.UTF_8.decode(min).toString().compareTo(
+                                            StandardCharsets.UTF_8.decode(lowerBounds.get(i + 1)).toString()) < 0) {
+                                        lowerBounds.put(i + 1, min);
+                                    }
+                                }
+                                else {
+                                    lowerBounds.put(i + 1, min);
+                                }
+                                if (upperBounds.containsKey(i + 1)) {
+                                    if (StandardCharsets.UTF_8.decode(max).toString().compareTo(
+                                            StandardCharsets.UTF_8.decode(upperBounds.get(i + 1)).toString()) > 0) {
+                                        upperBounds.put(i + 1, max);
+                                    }
+                                }
+                                else {
+                                    upperBounds.put(i + 1, max);
+                                }
+                                break;
+                            case BOOLEAN:
+                                if (lowerBounds.containsKey(i + 1)) {
+                                    if (min.get() < lowerBounds.get(i + 1).get()) {
+                                        lowerBounds.put(i + 1, min);
+                                    }
+                                }
+                                else {
+                                    lowerBounds.put(i + 1, min);
+                                }
+
+                                if (upperBounds.containsKey(i + 1)) {
+                                    if (max.get() > upperBounds.get(i + 1).get()) {
+                                        upperBounds.put(i + 1, max);
+                                    }
+                                }
+                                else {
+                                    upperBounds.put(i + 1, max);
+                                }
+                                break;
+                            default:
+                                break;
+                        }
                     }
                 }
             }
@@ -93,7 +228,8 @@ public class S3ParquetStats {
             LOG.info("IO Exception", e);
         }
 
-        return new Metrics(numRowsPerFile, null, valueCounts, nullValueCounts, nanValueCounts);
+        return new Metrics(numRowsPerFile, null, valueCounts, nullValueCounts,
+                nanValueCounts, lowerBounds, upperBounds);
     }
 
 //    private static void printColumnStats(ColumnChunkMetaData column) {
