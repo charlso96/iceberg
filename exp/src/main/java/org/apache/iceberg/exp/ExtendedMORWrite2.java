@@ -238,31 +238,7 @@ public class ExtendedMORWrite2 {
     private static String s3Region;
     private static S3Client s3;
     private static String ravenAddress;
-    static final Schema SCHEMA =
-            new Schema(
-                    Types.StructType.of(
-                                    required(1, "ss_sold_time_sk", Types.IntegerType.get()),
-                                    required(2, "ss_item_sk", Types.IntegerType.get()),
-                                    required(3, "ss_customer_sk", Types.IntegerType.get()),
-                                    required(4, "ss_cdemo_sk", Types.IntegerType.get()),
-                                    required(5, "ss_hdemo_sk", Types.IntegerType.get()),
-                                    required(6, "ss_addr_sk", Types.IntegerType.get()),
-                                    required(7, "ss_store_sk", Types.IntegerType.get()),
-                                    required(8, "ss_promo_sk", Types.IntegerType.get()),
-                                    required(9, "ss_ticket_number", Types.IntegerType.get()),
-                                    required(10, "ss_wholesale_cost", Types.IntegerType.get()),
-                                    required(11, "ss_list_price", Types.IntegerType.get()),
-                                    required(12, "ss_sales_price", Types.IntegerType.get()),
-                                    required(13, "ss_ext_discount_amt", Types.IntegerType.get()),
-                                    required(14, "ss_ext_sales_price", Types.IntegerType.get()),
-                                    required(15, "ss_ext_wholesale_cost", Types.IntegerType.get()),
-                                    required(16, "ss_ext_list_price", Types.IntegerType.get()),
-                                    required(17, "ss_ext_tax", Types.IntegerType.get()),
-                                    required(18, "ss_coupon_amt", Types.IntegerType.get()),
-                                    required(19, "ss_net_paid", Types.IntegerType.get()),
-                                    required(20, "ss_net_paid_inc_tax", Types.IntegerType.get()),
-                                    required(21, "ss_net_profit", Types.IntegerType.get()))
-                            .fields());
+    private static final Schema SCHEMA = TPCDSSchema.STORE_SALES;
 
     // hive catalog
     private static HiveCatalog catalog;
@@ -394,8 +370,8 @@ public class ExtendedMORWrite2 {
                 case INTEGER:
                     sb.append(String.format(Locale.getDefault(), "x::INTEGER AS %s,", column.name()));
                     break;
-                case DECIMAL:
-                    sb.append(String.format(Locale.getDefault(), "x::DECIMAL(11,2) AS %s,", column.name()));
+                case STRING:
+                    sb.append(String.format(Locale.getDefault(), "x::VARCHAR AS %s,", column.name()));
                     break;
                 default:
                     break;
