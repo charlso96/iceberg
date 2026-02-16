@@ -396,7 +396,7 @@ public class ExtendedMORWrite1 {
     return sb.toString();
   }
 
-  private static Metrics computeStats(Schema schema) {
+  private static Metrics computeStats(Schema schema, int i) {
     Map<Integer, Long> valueCounts = Maps.newHashMap();
     Map<Integer, Long> nullValueCounts = Maps.newHashMap();
     Map<Integer, Long> nanValueCounts = Maps.newHashMap();
@@ -405,16 +405,17 @@ public class ExtendedMORWrite1 {
 
     ByteBuffer lowerBoundInt = ByteBuffer.allocate(Integer.BYTES);
     lowerBoundInt.order(ByteOrder.LITTLE_ENDIAN); // Set byte order
-    lowerBoundInt.putInt(1);
+    lowerBoundInt.putInt(i * numRowsPerFile + 1);
     lowerBoundInt.rewind();
 
     ByteBuffer upperBoundInt = ByteBuffer.allocate(Integer.BYTES);
     upperBoundInt.order(ByteOrder.LITTLE_ENDIAN); // Set byte order
-    upperBoundInt.putInt(numRowsPerFile);
+    upperBoundInt.putInt((i + 1) * numRowsPerFile);
     upperBoundInt.rewind();
 
-    ByteBuffer lowerBoundStr = ByteBuffer.wrap(String.valueOf(1).getBytes(StandardCharsets.UTF_8));
-    ByteBuffer upperBoundStr = ByteBuffer.wrap(String.valueOf(numRowsPerFile).getBytes(StandardCharsets.UTF_8));
+    // There is a bit of bug for string field, but the store_sales does not contain any string fields
+    ByteBuffer lowerBoundStr = ByteBuffer.wrap(String.valueOf(i * numRowsPerFile + 1).getBytes(StandardCharsets.UTF_8));
+    ByteBuffer upperBoundStr = ByteBuffer.wrap(String.valueOf((i + 1) * numRowsPerFile).getBytes(StandardCharsets.UTF_8));
 
     List<Types.NestedField> columns = schema.columns();
     for (Types.NestedField column : columns) {
@@ -483,6 +484,7 @@ public class ExtendedMORWrite1 {
 
       Table table = catalog2.loadTable(TableIdentifier.of(dbName, tableName));
       // Keep running until flag change
+      int i = 0;
       while (running.get()) {
         try (Statement stmt = duckDbConn.createStatement()) {
           List<File2> fileLogs = Lists.newArrayList();
@@ -496,10 +498,11 @@ public class ExtendedMORWrite1 {
           stmt.execute(
                   String.format(
                           Locale.getDefault(),
-                          "CREATE TEMP TABLE staging_data AS SELECT %s FROM generate_series(1, %d) AS t(x);",
+                          "CREATE TEMP TABLE staging_data AS SELECT %s FROM generate_series(%d, %d) AS t(x);",
                           targetList,
-                          numRowsPerFile));
-
+                          i * numRowsPerFile + 1,
+                          (i + 1) * numRowsPerFile));
+          i += 1;
           // write the data to S3 as a parquet file
           String filePath = String.format("%s/%s.parquet", table.location(), UUID.randomUUID());
           stmt.execute(
@@ -560,13 +563,13 @@ public class ExtendedMORWrite1 {
             // stats extraction is performed in parallel for performance
             try {
               List<Future<Metrics>> stats = s3Executors.invokeAll(s3Tasks);
-              for (int i = 0; i < newDataFiles.size(); i++) {
+              for (int j = 0; j < newDataFiles.size(); j++) {
                 DataFile newDataFile =
                         DataFiles.builder(spec)
-                                .withFileSizeInBytes(newDataFiles.get(i).getSize())
+                                .withFileSizeInBytes(newDataFiles.get(j).getSize())
                                 .withFormat(FileFormat.PARQUET)
-                                .withMetrics(stats.get(i).get())
-                                .withPath(newDataFiles.get(i).getPath())
+                                .withMetrics(stats.get(j).get())
+                                .withPath(newDataFiles.get(j).getPath())
                                 .build();
                 txn.appendFile(newDataFile);
               }
@@ -628,6 +631,7 @@ public class ExtendedMORWrite1 {
       PartitionSpec spec = PartitionSpec.builderFor(SCHEMA).build();
 
       // Keep running until flag change
+      int i = 0;
       while (running.get()) {
         try (Statement stmt = duckDbConn.createStatement()) {
           List<File2> fileLogs = Lists.newArrayList();
@@ -644,12 +648,14 @@ public class ExtendedMORWrite1 {
           stmt.execute(
                   String.format(
                           Locale.getDefault(),
-                          "CREATE TEMP TABLE staging_data AS SELECT %s FROM generate_series(1, %d) AS t(x);",
+                          "CREATE TEMP TABLE staging_data AS SELECT %s FROM generate_series(%d, %d) AS t(x);",
                           targetList,
-                          numRowsPerFile));
+                          i * numRowsPerFile + 1,
+                          (i + 1) * numRowsPerFile));
 
           // construct file statistics
-          Metrics metrics = computeStats(SCHEMA);
+          Metrics metrics = computeStats(SCHEMA, i);
+          i += 1;
 
           // write the data to S3 as a parquet file
           String filePath = String.format("%s/%s.parquet", table.location(), UUID.randomUUID());
