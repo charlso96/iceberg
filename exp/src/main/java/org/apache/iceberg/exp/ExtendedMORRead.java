@@ -35,6 +35,7 @@ import java.io.IOException;
 import java.net.URI;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.sql.DriverManager;
@@ -157,7 +158,7 @@ public class ExtendedMORRead {
                 totalLatencyMillis += duration;
             }
 
-            double avgLatency = (LOAD_TABLE_TIMES.isEmpty()) ? 0 : (totalLatencyMillis / LOAD_TABLE_TIMES.size());
+            double avgLatency = LOAD_TABLE_TIMES.isEmpty() ? 0 : (totalLatencyMillis / LOAD_TABLE_TIMES.size());
 
             // 4. Construct the JSON Object
             ObjectNode summaryNode = mapper.createObjectNode();
@@ -376,22 +377,26 @@ public class ExtendedMORRead {
         return sb.toString();
     }
 
-    private static Metrics computeStats(Schema schema, int file_idx) {
+    private static Metrics computeStats(Schema schema, int i) {
         Map<Integer, Long> valueCounts = Maps.newHashMap();
         Map<Integer, Long> nullValueCounts = Maps.newHashMap();
         Map<Integer, Long> nanValueCounts = Maps.newHashMap();
         Map<Integer, ByteBuffer> lowerBounds = Maps.newHashMap();
         Map<Integer, ByteBuffer> upperBounds = Maps.newHashMap();
 
-        ByteBuffer lowerBound = ByteBuffer.allocate(Integer.BYTES);
-        lowerBound.order(ByteOrder.LITTLE_ENDIAN); // Set byte order
-        lowerBound.putInt(file_idx * numRowsPerFile + 1);
-        lowerBound.rewind();
+        ByteBuffer lowerBoundInt = ByteBuffer.allocate(Integer.BYTES);
+        lowerBoundInt.order(ByteOrder.LITTLE_ENDIAN); // Set byte order
+        lowerBoundInt.putInt(i * numRowsPerFile + 1);
+        lowerBoundInt.rewind();
 
-        ByteBuffer upperBound = ByteBuffer.allocate(Integer.BYTES);
-        upperBound.order(ByteOrder.LITTLE_ENDIAN); // Set byte order
-        upperBound.putInt((file_idx + 1) * numRowsPerFile);
-        upperBound.rewind();
+        ByteBuffer upperBoundInt = ByteBuffer.allocate(Integer.BYTES);
+        upperBoundInt.order(ByteOrder.LITTLE_ENDIAN); // Set byte order
+        upperBoundInt.putInt((i + 1) * numRowsPerFile);
+        upperBoundInt.rewind();
+
+        // There is a bit of bug for string field, but the store_sales does not contain any string fields
+        ByteBuffer lowerBoundStr = ByteBuffer.wrap(String.valueOf(i * numRowsPerFile + 1).getBytes(StandardCharsets.UTF_8));
+        ByteBuffer upperBoundStr = ByteBuffer.wrap(String.valueOf((i + 1) * numRowsPerFile).getBytes(StandardCharsets.UTF_8));
 
         List<Types.NestedField> columns = schema.columns();
         for (Types.NestedField column : columns) {
@@ -400,8 +405,12 @@ public class ExtendedMORRead {
             nanValueCounts.put(column.fieldId(), 0L);
             switch (column.type().typeId()) {
                 case INTEGER:
-                    lowerBounds.put(column.fieldId(), lowerBound);
-                    upperBounds.put(column.fieldId(), upperBound);
+                    lowerBounds.put(column.fieldId(), lowerBoundInt);
+                    upperBounds.put(column.fieldId(), upperBoundInt);
+                    break;
+                case STRING:
+                    lowerBounds.put(column.fieldId(), lowerBoundStr);
+                    upperBounds.put(column.fieldId(), upperBoundStr);
                     break;
                 default:
                     break;

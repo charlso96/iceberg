@@ -35,6 +35,7 @@ import java.io.IOException;
 import java.net.URI;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.sql.DriverManager;
@@ -46,7 +47,6 @@ import java.time.LocalTime;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
@@ -90,9 +90,9 @@ import org.slf4j.LoggerFactory;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
 
-public class ExtendedMORWrite {
+public class ExtendedMORWrite1 {
   // 1. Add this private constructor
-  private ExtendedMORWrite() {}
+  private ExtendedMORWrite1() {}
 
   public static class MetricsExporter {
     public static void exportMetricsToLog(String outputFile) {
@@ -187,7 +187,7 @@ public class ExtendedMORWrite {
 
       // 4. Construct the JSON Object
       ObjectNode summaryNode = mapper.createObjectNode();
-      summaryNode.put("exp_name", "ExtendedMORWrite");
+      summaryNode.put("exp_name", "ExtendedMORWrite1");
       summaryNode.put("exp_type", expType);
       summaryNode.put("txn_per_compaction", txnPerCompaction);
       summaryNode.put("duration", durationStr);
@@ -232,7 +232,7 @@ public class ExtendedMORWrite {
     // Getters, equals(), hashCode(), and toString() would go here
   }
 
-  private static final Logger LOG = LoggerFactory.getLogger(ExtendedMORWrite.class);
+  private static final Logger LOG = LoggerFactory.getLogger(ExtendedMORWrite1.class);
   private static final ObjectMapper JSON_MAPPER = new ObjectMapper();
   private static String expType;
   private static String durationStr;
@@ -403,15 +403,18 @@ public class ExtendedMORWrite {
     Map<Integer, ByteBuffer> lowerBounds = Maps.newHashMap();
     Map<Integer, ByteBuffer> upperBounds = Maps.newHashMap();
 
-    ByteBuffer lowerBound = ByteBuffer.allocate(Integer.BYTES);
-    lowerBound.order(ByteOrder.LITTLE_ENDIAN); // Set byte order
-    lowerBound.putInt(1);
-    lowerBound.rewind();
+    ByteBuffer lowerBoundInt = ByteBuffer.allocate(Integer.BYTES);
+    lowerBoundInt.order(ByteOrder.LITTLE_ENDIAN); // Set byte order
+    lowerBoundInt.putInt(1);
+    lowerBoundInt.rewind();
 
-    ByteBuffer upperBound = ByteBuffer.allocate(Integer.BYTES);
-    upperBound.order(ByteOrder.LITTLE_ENDIAN); // Set byte order
-    upperBound.putInt(numRowsPerFile);
-    upperBound.rewind();
+    ByteBuffer upperBoundInt = ByteBuffer.allocate(Integer.BYTES);
+    upperBoundInt.order(ByteOrder.LITTLE_ENDIAN); // Set byte order
+    upperBoundInt.putInt(numRowsPerFile);
+    upperBoundInt.rewind();
+
+    ByteBuffer lowerBoundStr = ByteBuffer.wrap(String.valueOf(1).getBytes(StandardCharsets.UTF_8));
+    ByteBuffer upperBoundStr = ByteBuffer.wrap(String.valueOf(numRowsPerFile).getBytes(StandardCharsets.UTF_8));
 
     List<Types.NestedField> columns = schema.columns();
     for (Types.NestedField column : columns) {
@@ -420,8 +423,12 @@ public class ExtendedMORWrite {
       nanValueCounts.put(column.fieldId(), 0L);
       switch (column.type().typeId()) {
         case INTEGER:
-          lowerBounds.put(column.fieldId(), lowerBound);
-          upperBounds.put(column.fieldId(), upperBound);
+          lowerBounds.put(column.fieldId(), lowerBoundInt);
+          upperBounds.put(column.fieldId(), upperBoundInt);
+          break;
+        case STRING:
+          lowerBounds.put(column.fieldId(), lowerBoundStr);
+          upperBounds.put(column.fieldId(), upperBoundStr);
           break;
         default:
           break;
@@ -444,7 +451,7 @@ public class ExtendedMORWrite {
     runRavenExpImpl(duration);
 
     String expResultDir = expConfigs.get("exp_result_dir");
-    String logFileName = String.format(Locale.getDefault(),"%s/extendedmorwrite-iceberg-raven-%d-%d-log.json",
+    String logFileName = String.format(Locale.getDefault(),"%s/extendedmorwrite1-iceberg-raven-%d-%d-log.json",
             expResultDir, txnPerCompaction, numRowsPerFile);
     String summaryFileName = String.format("%s/summary.json", expResultDir);
     MetricsExporter.exportMetricsToLog(logFileName);
@@ -462,7 +469,7 @@ public class ExtendedMORWrite {
     runVanillaExpImpl(duration);
 
     String expResultDir = expConfigs.get("exp_result_dir");
-    String logFileName = String.format(Locale.getDefault(),"%s/extendedmorwrite-iceberg-vanilla-%d-%d-log.json",
+    String logFileName = String.format(Locale.getDefault(),"%s/extendedmorwrite1-iceberg-vanilla-%d-%d-log.json",
             expResultDir, txnPerCompaction, numRowsPerFile);
     String summaryFileName = String.format("%s/summary.json", expResultDir);
     MetricsExporter.exportMetricsToLog(logFileName);

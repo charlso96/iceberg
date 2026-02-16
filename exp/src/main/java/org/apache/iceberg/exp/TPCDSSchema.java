@@ -22,8 +22,8 @@
 package org.apache.iceberg.exp;
 
 import java.util.List;
-import org.apache.hadoop.util.Lists;
 import org.apache.iceberg.Schema;
+import org.apache.iceberg.relocated.com.google.common.collect.Lists;
 import org.apache.iceberg.types.Types;
 
 import static org.apache.iceberg.types.Types.NestedField.required;
