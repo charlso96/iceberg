@@ -209,6 +209,7 @@ public class ExtendedMORRead {
     private static final Logger LOG = LoggerFactory.getLogger(ExtendedMORRead.class);
     private static final ObjectMapper JSON_MAPPER = new ObjectMapper();
     private static String expType;
+    private static String populate;
     private static String workspaceName;
     private static String dbName;
     private static String tableName;
@@ -313,6 +314,7 @@ public class ExtendedMORRead {
         // read the config file for experimentation
         Map<String, String> expConfigs = parseJsonToMap(args[0]);
         expType = expConfigs.get("exp_type");
+        populate = expConfigs.get("populate");
         numDataFiles = Integer.parseInt(expConfigs.get("num_data_files"));
         numMeasures = Integer.parseInt(expConfigs.get("num_measures"));
         selectivity = Integer.parseInt(expConfigs.get("selectivity"));
@@ -425,11 +427,17 @@ public class ExtendedMORRead {
         PartitionSpec spec = PartitionSpec.builderFor(SCHEMA).build();
         TableIdentifier tableIdent = TableIdentifier.of(dbName, tableName);
         String location = String.format("%s/%s.db/%s", warehouseLocation, dbName, tableName);
-        catalog2.createNamespace(Namespace.of(dbName));
-        catalog2.createTable(tableIdent, SCHEMA, spec, location, ImmutableMap.of());
+
+        if (populate.equals("true")) {
+            catalog2.createNamespace(Namespace.of(dbName));
+            catalog2.createTable(tableIdent, SCHEMA, spec, location, ImmutableMap.of());
+        }
 
         ravenCatalog = new RavenCatalog(ravenAddress);
-        populateRavenExp();
+
+        if (populate.equals("true")) {
+            populateRavenExp();
+        }
         runRavenExpImpl();
 
         String expResultDir = expConfigs.get("exp_result_dir");
@@ -444,10 +452,12 @@ public class ExtendedMORRead {
         PartitionSpec spec = PartitionSpec.builderFor(SCHEMA).build();
         TableIdentifier tableIdent = TableIdentifier.of(dbName, tableName);
         String location = String.format("%s/%s.db/%s", warehouseLocation, dbName, tableName);
-        catalog.createNamespace(Namespace.of(dbName));
-        catalog.createTable(tableIdent, SCHEMA, spec, location, ImmutableMap.of());
 
-        populateVanillaExp();
+        if (populate.equals("true")) {
+            catalog.createNamespace(Namespace.of(dbName));
+            catalog.createTable(tableIdent, SCHEMA, spec, location, ImmutableMap.of());
+            populateVanillaExp();
+        }
         runVanillaExpImpl();
 
         String expResultDir = expConfigs.get("exp_result_dir");

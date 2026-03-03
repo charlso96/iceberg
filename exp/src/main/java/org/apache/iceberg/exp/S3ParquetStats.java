@@ -87,137 +87,116 @@ public class S3ParquetStats {
 
                     for (int i = 0; i < blockColumns.size(); i++) {
                         Statistics<?> stats = blockColumns.get(i).getStatistics();
+
+                        // 1. Safely handle null stats object
+                        if (stats == null) {
+                            continue;
+                        }
+
                         long numNulls = stats.getNumNulls();
                         valueCounts.put(i + 1, valueCounts.get(i + 1) + blockRowCount - numNulls);
                         nullValueCounts.put(i + 1, nullValueCounts.get(i + 1) + numNulls);
 
-                        ByteBuffer min = ByteBuffer.wrap(stats.getMinBytes());
-                        ByteBuffer max = ByteBuffer.wrap(stats.getMaxBytes());
+                        // 2. Bail out BEFORE wrapping if stats are empty or only contain nulls
+                        if (stats.isEmpty() || !stats.hasNonNullValue() || stats.getMinBytes() == null) {
+                            continue;
+                        }
+
+                        // 3. Extra safety check for byte array length to strictly prevent underflow
+                        byte[] minBytes = stats.getMinBytes();
+                        byte[] maxBytes = stats.getMaxBytes();
+
+                        // INT32 needs 4 bytes, INT64 needs 8, etc.
+                        // If the byte array is completely empty, skip boundary extraction.
+                        if (minBytes.length == 0 || maxBytes.length == 0) {
+                            continue;
+                        }
 
                         switch (blockColumns.get(i).getPrimitiveType().getPrimitiveTypeName()) {
                             case INT32:
-                                if (lowerBounds.containsKey(i + 1)) {
-                                    if (min.order(java.nio.ByteOrder.LITTLE_ENDIAN).getInt() <
-                                            lowerBounds.get(i + 1).getInt()) {
-                                        lowerBounds.put(i + 1, min);
-                                    }
-                                }
-                                else {
-                                    lowerBounds.put(i + 1, min.order(java.nio.ByteOrder.LITTLE_ENDIAN));
-                                }
+                                int minInt = ByteBuffer.wrap(minBytes).order(java.nio.ByteOrder.LITTLE_ENDIAN).getInt();
+                                int maxInt = ByteBuffer.wrap(maxBytes).order(java.nio.ByteOrder.LITTLE_ENDIAN).getInt();
 
-                                if (upperBounds.containsKey(i + 1)) {
-                                    if (max.order(java.nio.ByteOrder.LITTLE_ENDIAN).getInt() >
-                                            upperBounds.get(i + 1).getInt()) {
-                                        upperBounds.put(i + 1, max);
-                                    }
+                                // Use .getInt(0) to read the stored buffer statelessly
+                                if (!lowerBounds.containsKey(i + 1) || minInt < lowerBounds.get(i + 1)
+                                        .order(java.nio.ByteOrder.LITTLE_ENDIAN).getInt(0)) {
+                                    lowerBounds.put(i + 1, ByteBuffer.wrap(minBytes));
                                 }
-                                else {
-                                    upperBounds.put(i + 1, max.order(java.nio.ByteOrder.LITTLE_ENDIAN));
+                                if (!upperBounds.containsKey(i + 1) || maxInt > upperBounds.get(i + 1)
+                                        .order(java.nio.ByteOrder.LITTLE_ENDIAN).getInt(0)) {
+                                    upperBounds.put(i + 1, ByteBuffer.wrap(maxBytes));
                                 }
                                 break;
+
                             case INT64:
-                                if (lowerBounds.containsKey(i + 1)) {
-                                    if (min.order(java.nio.ByteOrder.LITTLE_ENDIAN).getLong() <
-                                            lowerBounds.get(i + 1).getLong()) {
-                                        lowerBounds.put(i + 1, min);
-                                    }
-                                }
-                                else {
-                                    lowerBounds.put(i + 1, min.order(java.nio.ByteOrder.LITTLE_ENDIAN));
-                                }
+                                long minLong = ByteBuffer.wrap(minBytes).order(java.nio.ByteOrder.LITTLE_ENDIAN).getLong();
+                                long maxLong = ByteBuffer.wrap(maxBytes).order(java.nio.ByteOrder.LITTLE_ENDIAN).getLong();
 
-                                if (upperBounds.containsKey(i + 1)) {
-                                    if (max.order(java.nio.ByteOrder.LITTLE_ENDIAN).getLong() >
-                                            upperBounds.get(i + 1).getLong()) {
-                                        upperBounds.put(i + 1, max);
-                                    }
+                                if (!lowerBounds.containsKey(i + 1) || minLong < lowerBounds.get(i + 1)
+                                        .order(java.nio.ByteOrder.LITTLE_ENDIAN).getLong(0)) {
+                                    lowerBounds.put(i + 1, ByteBuffer.wrap(minBytes));
                                 }
-                                else {
-                                    upperBounds.put(i + 1, max.order(java.nio.ByteOrder.LITTLE_ENDIAN));
+                                if (!upperBounds.containsKey(i + 1) || maxLong > upperBounds.get(i + 1)
+                                        .order(java.nio.ByteOrder.LITTLE_ENDIAN).getLong(0)) {
+                                    upperBounds.put(i + 1, ByteBuffer.wrap(maxBytes));
                                 }
                                 break;
+
                             case FLOAT:
-                                if (lowerBounds.containsKey(i + 1)) {
-                                    if (min.order(java.nio.ByteOrder.LITTLE_ENDIAN).getFloat() <
-                                            lowerBounds.get(i + 1).getFloat()) {
-                                        lowerBounds.put(i + 1, min);
-                                    }
-                                }
-                                else {
-                                    lowerBounds.put(i + 1, min.order(java.nio.ByteOrder.LITTLE_ENDIAN));
-                                }
+                                float minFloat = ByteBuffer.wrap(minBytes).order(java.nio.ByteOrder.LITTLE_ENDIAN).getFloat();
+                                float maxFloat = ByteBuffer.wrap(maxBytes).order(java.nio.ByteOrder.LITTLE_ENDIAN).getFloat();
 
-                                if (upperBounds.containsKey(i + 1)) {
-                                    if (max.order(java.nio.ByteOrder.LITTLE_ENDIAN).getFloat() >
-                                            upperBounds.get(i + 1).getFloat()) {
-                                        upperBounds.put(i + 1, max);
-                                    }
+                                if (!lowerBounds.containsKey(i + 1) || minFloat < lowerBounds.get(i + 1)
+                                        .order(java.nio.ByteOrder.LITTLE_ENDIAN).getFloat(0)) {
+                                    lowerBounds.put(i + 1, ByteBuffer.wrap(minBytes));
                                 }
-                                else {
-                                    upperBounds.put(i + 1, max.order(java.nio.ByteOrder.LITTLE_ENDIAN));
+                                if (!upperBounds.containsKey(i + 1) || maxFloat > upperBounds.get(i + 1)
+                                        .order(java.nio.ByteOrder.LITTLE_ENDIAN).getFloat(0)) {
+                                    upperBounds.put(i + 1, ByteBuffer.wrap(maxBytes));
                                 }
                                 break;
+
                             case DOUBLE:
-                                if (lowerBounds.containsKey(i + 1)) {
-                                    if (min.order(java.nio.ByteOrder.LITTLE_ENDIAN).getDouble() <
-                                            lowerBounds.get(i + 1).getDouble()) {
-                                        lowerBounds.put(i + 1, min);
-                                    }
-                                }
-                                else {
-                                    lowerBounds.put(i + 1, min.order(java.nio.ByteOrder.LITTLE_ENDIAN));
-                                }
+                                double minDouble = ByteBuffer.wrap(minBytes).order(java.nio.ByteOrder.LITTLE_ENDIAN).getDouble();
+                                double maxDouble = ByteBuffer.wrap(maxBytes).order(java.nio.ByteOrder.LITTLE_ENDIAN).getDouble();
 
-                                if (upperBounds.containsKey(i + 1)) {
-                                    if (max.order(java.nio.ByteOrder.LITTLE_ENDIAN).getDouble() >
-                                            upperBounds.get(i + 1).getDouble()) {
-                                        upperBounds.put(i + 1, max);
-                                    }
+                                if (!lowerBounds.containsKey(i + 1) || minDouble < lowerBounds.get(i + 1)
+                                        .order(java.nio.ByteOrder.LITTLE_ENDIAN).getDouble(0)) {
+                                    lowerBounds.put(i + 1, ByteBuffer.wrap(minBytes));
                                 }
-                                else {
-                                    upperBounds.put(i + 1, max.order(java.nio.ByteOrder.LITTLE_ENDIAN));
+                                if (!upperBounds.containsKey(i + 1) || maxDouble > upperBounds.get(i + 1)
+                                        .order(java.nio.ByteOrder.LITTLE_ENDIAN).getDouble(0)) {
+                                    upperBounds.put(i + 1, ByteBuffer.wrap(maxBytes));
                                 }
                                 break;
+
                             case BINARY:
-                                if (lowerBounds.containsKey(i + 1)) {
-                                    if (StandardCharsets.UTF_8.decode(min).toString().compareTo(
-                                            StandardCharsets.UTF_8.decode(lowerBounds.get(i + 1)).toString()) < 0) {
-                                        lowerBounds.put(i + 1, min);
-                                    }
-                                }
-                                else {
-                                    lowerBounds.put(i + 1, min);
-                                }
-                                if (upperBounds.containsKey(i + 1)) {
-                                    if (StandardCharsets.UTF_8.decode(max).toString().compareTo(
-                                            StandardCharsets.UTF_8.decode(upperBounds.get(i + 1)).toString()) > 0) {
-                                        upperBounds.put(i + 1, max);
-                                    }
-                                }
-                                else {
-                                    upperBounds.put(i + 1, max);
-                                }
-                                break;
-                            case BOOLEAN:
-                                if (lowerBounds.containsKey(i + 1)) {
-                                    if (min.get() < lowerBounds.get(i + 1).get()) {
-                                        lowerBounds.put(i + 1, min);
-                                    }
-                                }
-                                else {
-                                    lowerBounds.put(i + 1, min);
-                                }
+                                String minStr = new String(minBytes, StandardCharsets.UTF_8);
+                                String maxStr = new String(maxBytes, StandardCharsets.UTF_8);
 
-                                if (upperBounds.containsKey(i + 1)) {
-                                    if (max.get() > upperBounds.get(i + 1).get()) {
-                                        upperBounds.put(i + 1, max);
-                                    }
+                                // Use .duplicate() because StandardCharsets.decode() consumes the buffer
+                                if (!lowerBounds.containsKey(i + 1) || minStr.compareTo(StandardCharsets.UTF_8
+                                        .decode(lowerBounds.get(i + 1).duplicate()).toString()) < 0) {
+                                    lowerBounds.put(i + 1, ByteBuffer.wrap(minBytes));
                                 }
-                                else {
-                                    upperBounds.put(i + 1, max);
+                                if (!upperBounds.containsKey(i + 1) || maxStr.compareTo(StandardCharsets.UTF_8
+                                        .decode(upperBounds.get(i + 1).duplicate()).toString()) > 0) {
+                                    upperBounds.put(i + 1, ByteBuffer.wrap(maxBytes));
                                 }
                                 break;
+
+                            case BOOLEAN:
+                                byte minBool = minBytes[0];
+                                byte maxBool = maxBytes[0];
+
+                                if (!lowerBounds.containsKey(i + 1) || minBool < lowerBounds.get(i + 1).get(0)) {
+                                    lowerBounds.put(i + 1, ByteBuffer.wrap(minBytes));
+                                }
+                                if (!upperBounds.containsKey(i + 1) || maxBool > upperBounds.get(i + 1).get(0)) {
+                                    upperBounds.put(i + 1, ByteBuffer.wrap(maxBytes));
+                                }
+                                break;
+
                             default:
                                 break;
                         }
