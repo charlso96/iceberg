@@ -366,7 +366,7 @@ public class MultiTableTxn3 {
             }
         }
 
-        int numRaven = Math.min(numThreads, 4);
+        int numRaven = Math.min(numThreads, 6);
         for (int i = 0; i < numRaven; i++) {
             RAVEN_CATALOGS.add(new RavenCatalog(ravenAddress));
         }
@@ -727,7 +727,7 @@ public class MultiTableTxn3 {
             INSERT_FILE_TIMES.get(threadNum).add(new TimePair(afterLoadTable, afterInsertFile));
             COMMIT_TIMES.get(threadNum).add(new TimePair(afterInsertFile, afterCommit));
             OP_SUCCESS.get(threadNum).add(success);
-            OP_TYPES.get(threadNum).add("insert");
+            OP_TYPES.get(threadNum).add("compact");
 
         } catch (SQLException e) {
             LOG.info("Database error occurred", e);

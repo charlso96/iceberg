@@ -235,7 +235,7 @@ public class GC1 {
 
     private static final Logger LOG = LoggerFactory.getLogger(GC1.class);
     private static final ObjectMapper JSON_MAPPER = new ObjectMapper();
-    private static final int NUM_TABLES = 10000;
+    private static final int NUM_TABLES = 1000;
 
     private static float refreshRatio;
     private static float insertRatio;
@@ -456,10 +456,13 @@ public class GC1 {
             List<String> filesToScan = Lists.newArrayList();
             RavenCatalog.BufIterator bufIter = new RavenCatalog.BufIterator(resultSet);
             while (bufIter.valid()) {
+                String action = new String(resultSet, bufIter.dataIdx(), bufIter.elemSize(), UTF_8);
                 bufIter.next();
                 String path = new String(resultSet, bufIter.dataIdx(), bufIter.elemSize(), UTF_8);
                 bufIter.next();
-                filesToScan.add(path);
+                if (action.equals("add")) {
+                    filesToScan.add(path);
+                }
             }
 
             tableVids.set(tableNum, tableObject.getSnapshotVid());
@@ -474,7 +477,7 @@ public class GC1 {
                 stmt.execute(
                         String.format(
                                 Locale.getDefault(),
-                                "SELECT * FROM read_parquet([ %s ]);",
+                                "COPY (SELECT * FROM read_parquet([ %s ])) TO '/dev/null' (FORMAT CSV);",
                                 fileToScanStr));
                 afterInsertFile = Instant.now();
             }

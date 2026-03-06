@@ -659,7 +659,8 @@ public class ExtendedMORRead {
 
                 // execute selective query against the files
                 stmt.execute(String.format(Locale.getDefault(),
-                                "SELECT * FROM read_parquet([ %s ]) WHERE ss_sold_date_sk >= %d AND ss_sold_date_sk < %d;",
+                                "COPY (SELECT * FROM read_parquet([ %s ]) WHERE ss_sold_date_sk >=" +
+                                        " %d AND ss_sold_date_sk < %d) TO '/dev/null' (FORMAT CSV);",
                         fileToScanStr, lowerBound, upperBound));
 
                 Instant afterSelect = Instant.now();
@@ -781,8 +782,10 @@ public class ExtendedMORRead {
                 Instant afterListFiles = Instant.now();
 
                 // execute selective query against the files
+                // execute selective query against the files
                 stmt.execute(String.format(Locale.getDefault(),
-                        "SELECT * FROM read_parquet([ %s ]) WHERE ss_sold_date_sk >= %d AND ss_sold_date_sk < %d;",
+                        "COPY (SELECT * FROM read_parquet([ %s ]) WHERE ss_sold_date_sk >=" +
+                                " %d AND ss_sold_date_sk < %d) TO '/dev/null' (FORMAT CSV);",
                         fileToScanStr, lowerBound, upperBound));
 
                 Instant afterSelect = Instant.now();

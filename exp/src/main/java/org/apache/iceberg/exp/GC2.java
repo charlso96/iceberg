@@ -215,6 +215,7 @@ public class GC2 {
     private static int numExpireSnapshots;
     // total number of files inserted
     private static int numFiles;
+    private static long sleepTime;
     private static String warehouseLocation;
     private static String s3Secret;
     private static String s3KeyId;
@@ -274,6 +275,7 @@ public class GC2 {
         numExpireSnapshots = Integer.parseInt(expConfigs.get("num_expire_snapshots"));
         // total number of files inserted
         numFiles = Integer.parseInt(expConfigs.get("num_files"));
+        sleepTime = Long.parseLong(expConfigs.get("sleep_time"));
         warehouseLocation = expConfigs.get("warehouse_location");
         s3Secret = expConfigs.get("s3_secret");
         s3KeyId = expConfigs.get("s3_key_id");
@@ -342,8 +344,8 @@ public class GC2 {
 
         String expResultDir = expConfigs.get("exp_result_dir");
 
-        String logFileName = String.format(Locale.getDefault(),"%s/gc2-iceberg-%d-%d-log.json",
-                expResultDir, numExpireSnapshots, numThreads);
+        String logFileName = String.format(Locale.getDefault(),"%s/gc2-iceberg-%d-%d-%d-log.json",
+                expResultDir, numExpireSnapshots, numThreads, sleepTime);
         String summaryFileName = String.format("%s/summary.json", expResultDir);
         MetricsExporter.exportMetricsToLog(logFileName);
         MetricsExporter.appendSummaryToJson(summaryFileName);
@@ -530,7 +532,7 @@ public class GC2 {
 
             try {
                 // Sleep for 20 milliseconds
-                Thread.sleep(20);
+                Thread.sleep(sleepTime);
             } catch (InterruptedException e) {
                 // It is best practice to re-interrupt the thread if an InterruptedException occurs
                 Thread.currentThread().interrupt();
